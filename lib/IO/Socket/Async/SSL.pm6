@@ -181,7 +181,7 @@ class IO::Socket::Async::SSL {
             }
         }
         orwith $!connected-promise {
-            if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl)) >= 0 {
+            if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl), 1) > 0 {
                 $!connected-promise.keep(self);
             }
             self!flush-read-bio();
@@ -224,8 +224,8 @@ class IO::Socket::Async::SSL {
 
     my constant SSL_ERROR_WANT_READ = 2;
     my constant SSL_ERROR_WANT_WRITE = 3;
-    sub check($ssl, $rc) {
-        if $rc < 0 {
+    sub check($ssl, $rc, $expected = 0) {
+        if $rc < $expected {
             my $error = OpenSSL::SSL::SSL_get_error($ssl, $rc);
             unless $error == any(SSL_ERROR_WANT_READ, SSL_ERROR_WANT_WRITE) {
                 die X::IO::Socket::Async::SSL.new(
