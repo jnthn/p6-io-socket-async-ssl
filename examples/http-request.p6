@@ -8,3 +8,4 @@ react {
         .print
     }
 }
+$conn.close;
