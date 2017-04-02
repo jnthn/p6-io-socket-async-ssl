@@ -166,14 +166,6 @@ class IO::Socket::Async::SSL {
 
     method !cleanup() {
         $lib-lock.protect: {
-            if $!read-bio {
-                OpenSSL::Bio::BIO_free($!read-bio);
-                $!read-bio = Nil;
-            }
-            if $!write-bio {
-                OpenSSL::Bio::BIO_free($!write-bio);
-                $!write-bio = Nil;
-            }
             if $!ssl {
                 OpenSSL::SSL::SSL_free($!ssl);
                 $!ssl = Nil;
