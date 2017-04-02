@@ -128,13 +128,13 @@ class IO::Socket::Async::SSL {
         }
     }
 
-    method Supply(:$bin) {
+    method Supply(:$bin, :$scheduler = $*SCHEDULER) {
         if $bin {
-            $!bytes-received.Supply
+            $!bytes-received.Supply.schedule-on($scheduler)
         }
         else {
             supply {
-                whenever $!bytes-received {
+                whenever $!bytes-received.Supply.schedule-on($scheduler) {
                     # XXX use streaming decoder and correct encoding
                     emit .decode('latin-1')
                 }
