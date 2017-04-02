@@ -23,6 +23,8 @@ OpenSSL::SSL::SSL_library_init();
 # There are smarter things possible.
 my $lib-lock = Lock.new;
 
+class X::IO::Socket::Async::SSL is Exception {}
+
 class IO::Socket::Async::SSL {
     has IO::Socket::Async $!sock;
     has OpenSSL::Ctx::SSL_CTX $!ctx;
@@ -72,9 +74,13 @@ class IO::Socket::Async::SSL {
                 my $ssl = OpenSSL::SSL::SSL_new($ctx);
                 my $read-bio = BIO_new(BIO_s_mem());
                 my $write-bio = BIO_new(BIO_s_mem());
-                OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio);
+                check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
                 OpenSSL::SSL::SSL_set_connect_state($ssl);
-                SSL_do_handshake($ssl);
+                check($ssl, SSL_do_handshake($ssl));
+                CATCH {
+                    OpenSSL::SSL::SSL_free($ssl) if $ssl;
+                    OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
+                }
                 self.bless(
                     :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
                     :$connected-promise
@@ -119,8 +125,12 @@ class IO::Socket::Async::SSL {
                     my $ssl = OpenSSL::SSL::SSL_new($ctx);
                     my $read-bio = BIO_new(BIO_s_mem());
                     my $write-bio = BIO_new(BIO_s_mem());
-                    OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio);
+                    check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
                     OpenSSL::SSL::SSL_set_accept_state($ssl);
+                    CATCH {
+                        OpenSSL::SSL::SSL_free($ssl) if $ssl;
+                        OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
+                    }
                     self.bless(
                         :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
                         :$accepted-promise
@@ -156,38 +166,51 @@ class IO::Socket::Async::SSL {
                 $!bytes-received.emit($buf.subbuf(0, $bytes-read));
             }
             else {
-                # XXX error handling...
+                check($!ssl, $bytes-read);
             }
             with $!shutdown-promise {
-                my $rc = OpenSSL::SSL::SSL_shutdown($!ssl);
-                self!flush-read-bio();
-                if $rc >= 0 {
+                if check($!ssl, OpenSSL::SSL::SSL_shutdown($!ssl)) >= 0 {
                     $!shutdown-promise.keep(True);
                 }
-                else {
-                    # XXX Error handling
+                self!flush-read-bio();
+            }
+            CATCH {
+                default {
+                    $!bytes-received.quit($_);
                 }
             }
         }
         orwith $!connected-promise {
-            my $rc = OpenSSL::SSL::SSL_connect($!ssl);
-            if $rc < 0 {
-                # XXX Error check needed
-            }
-            else {
+            if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl)) >= 0 {
                 $!connected-promise.keep(self);
             }
             self!flush-read-bio();
+            CATCH {
+                default {
+                    if $!connected-promise {
+                        $!bytes-received.quit($_);
+                    }
+                    else {
+                        $!connected-promise.break($_);
+                    }
+                }
+            }
         }
         orwith $!accepted-promise {
-            my $rc = OpenSSL::SSL::SSL_accept($!ssl);
-            if $rc < 0 {
-                # XXX Error check needed
-            }
-            else {
+            if check($!ssl, OpenSSL::SSL::SSL_accept($!ssl)) >= 0 {
                 $!accepted-promise.keep(self);
             }
             self!flush-read-bio();
+            CATCH {
+                default {
+                    if $!accepted-promise {
+                        $!bytes-received.quit($_);
+                    }
+                    else {
+                        $!accepted-promise.break($_);
+                    }
+                }
+            }
         }
     }
 
@@ -197,6 +220,20 @@ class IO::Socket::Async::SSL {
             last if $bytes-read < 0;
             $!sock.write($buf.subbuf(0, $bytes-read));
         }
+    }
+
+    my constant SSL_ERROR_WANT_READ = 2;
+    my constant SSL_ERROR_WANT_WRITE = 3;
+    sub check($ssl, $rc) {
+        if $rc < 0 {
+            my $error = OpenSSL::SSL::SSL_get_error($ssl, $rc);
+            unless $error == any(SSL_ERROR_WANT_READ, SSL_ERROR_WANT_WRITE) {
+                die X::IO::Socket::Async::SSL.new(
+                    message => OpenSSL::Err::ERR_error_string($error, Nil)
+                );
+            }
+        }
+        $rc
     }
 
     method Supply(:$bin, :$scheduler = $*SCHEDULER) {
