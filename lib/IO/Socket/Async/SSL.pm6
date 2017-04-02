@@ -34,7 +34,7 @@ class IO::Socket::Async::SSL {
     has Supplier::Preserving $!bytes-received .= new;
 
     method new() {
-        die "Cannot create an asynchronous socket directly; please use\n" ~
+        die "Cannot create an asynchronous SSL socket directly; please use\n" ~
             "IO::Socket::Async::SSL.connect or IO::Socket::Async::SSL.listen\n";
     }
 
