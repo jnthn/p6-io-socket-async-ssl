@@ -30,6 +30,8 @@ class IO::Socket::Async::SSL {
     has $!read-bio;
     has $!write-bio;
     has $!connected-promise;
+    has $!accepted-promise;
+    has $!shutdown-promise;
     has $.enc;
     has Supplier::Preserving $!bytes-received .= new;
 
@@ -39,7 +41,7 @@ class IO::Socket::Async::SSL {
     }
 
     submethod BUILD(:$!sock, :$!enc, :$!ctx, :$!ssl, :$!read-bio, :$!write-bio,
-                    :$!connected-promise) {
+                    :$!connected-promise, :$!accepted-promise) {
         $!sock.Supply(:bin).tap:
             -> Blob $data {
                 $lib-lock.protect: {
@@ -97,8 +99,57 @@ class IO::Socket::Async::SSL {
         OpenSSL::Ctx::SSL_CTX_new($method)
     }
 
+    method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
+                  :$enc = 'utf8', :$scheduler = $*SCHEDULER,
+                  OpenSSL::ProtocolVersion :$version = -1,
+                  :$certificate-file, :$private-key-file) {
+        supply {
+            whenever IO::Socket::Async.listen($host, $port, :$scheduler) -> $sock {
+                my $accepted-promise = Promise.new;
+                $lib-lock.protect: {
+                    my $ctx = self!build-server-ctx($version);
+                    with $certificate-file {
+                        OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
+                            $certificate-file, 1);
+                    }
+                    with $private-key-file {
+                        OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
+                            $private-key-file, 1);
+                    }
+                    my $ssl = OpenSSL::SSL::SSL_new($ctx);
+                    my $read-bio = BIO_new(BIO_s_mem());
+                    my $write-bio = BIO_new(BIO_s_mem());
+                    OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio);
+                    OpenSSL::SSL::SSL_set_accept_state($ssl);
+                    self.bless(
+                        :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
+                        :$accepted-promise
+                    )
+                }
+                whenever $accepted-promise -> $ssl-socket {
+                    emit $ssl-socket;
+                }
+            }
+        }
+    }
+
+    method !build-server-ctx($version) {
+        my $method = do given $version {
+            when 2 { OpenSSL::Method::SSLv2_server_method() }
+            when 3 { OpenSSL::Method::SSLv3_server_method() }
+            when 1 { OpenSSL::Method::TLSv1_server_method() }
+            when 1.1 { OpenSSL::Method::TLSv1_1_server_method() }
+            when 1.2 { OpenSSL::Method::TLSv1_2_server_method() }
+            default {
+                try { OpenSSL::Method::TLSv1_2_server_method() } ||
+                    try { OpenSSL::Method::TLSv1_server_method() }
+            }
+        }
+        OpenSSL::Ctx::SSL_CTX_new($method)
+    }
+
     method !handle-buffers() {
-        if $!connected-promise {
+        if $!connected-promise || $!accepted-promise {
             my $buf = Buf.allocate(32768);
             my $bytes-read = OpenSSL::SSL::SSL_read($!ssl, $buf, 32768);
             if $bytes-read >= 0 {
@@ -107,16 +158,36 @@ class IO::Socket::Async::SSL {
             else {
                 # XXX error handling...
             }
+            with $!shutdown-promise {
+                my $rc = OpenSSL::SSL::SSL_shutdown($!ssl);
+                self!flush-read-bio();
+                if $rc >= 0 {
+                    $!shutdown-promise.keep(True);
+                }
+                else {
+                    # XXX Error handling
+                }
+            }
         }
-        else {
+        orwith $!connected-promise {
             my $rc = OpenSSL::SSL::SSL_connect($!ssl);
             if $rc < 0 {
-                # XXX Error check needed, assume need write for now
-                self!flush-read-bio();
+                # XXX Error check needed
             }
             else {
                 $!connected-promise.keep(self);
             }
+            self!flush-read-bio();
+        }
+        orwith $!accepted-promise {
+            my $rc = OpenSSL::SSL::SSL_accept($!ssl);
+            if $rc < 0 {
+                # XXX Error check needed
+            }
+            else {
+                $!accepted-promise.keep(self);
+            }
+            self!flush-read-bio();
         }
     }
 
@@ -155,7 +226,15 @@ class IO::Socket::Async::SSL {
         }
     }
 
-    method close(IO::Socket::Async::SSL:D:) {
+    method close(IO::Socket::Async::SSL:D: --> Nil) {
+        $lib-lock.protect: {
+            return if $!shutdown-promise;
+            without $!shutdown-promise {
+                $!shutdown-promise = Promise.new;
+                self!handle-buffers();
+            }
+        }
+        await $!shutdown-promise;
         $!sock.close;
         self!cleanup();
     }
