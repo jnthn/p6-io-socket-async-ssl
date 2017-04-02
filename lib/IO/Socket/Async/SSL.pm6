@@ -10,6 +10,43 @@ use NativeCall;
 sub BIO_new(OpenSSL::Bio::BIO_METHOD) returns OpaquePointer is native(&gen-lib) {*}
 sub BIO_s_mem() returns OpenSSL::Bio::BIO_METHOD is native(&gen-lib) {*}
 sub SSL_do_handshake(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
+sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) {*}
+sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
+sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer is native(&gen-lib) {*}
+my constant %VERIFY_FAILURE_REASONS = %(
+     2 => 'unable to get issuer certificate',
+     3 => 'unable to get certificate CRL',
+     4 => 'unable to decrypt certificate\'s signature',
+     5 => 'unable to decrypt CRL\'s signature',
+     6 => 'unable to decode issuer public key',
+     7 => 'certificate signature failure',
+     8 => 'CRL signature failure',
+     9 => 'certificate is not yet valid',
+     10 => 'certificate has expired',
+     11 => 'CRL is not yet valid',
+     12 => 'CRL has expired',
+     13 => 'format error in certificate\'s notBefore field',
+     14 => 'format error in certificate\'s notAfter field',
+     15 => 'format error in CRL\'s lastUpdate field',
+     16 => 'format error in CRL\'s nextUpdate field',
+     17 => 'out of memory',
+     18 => 'self signed certificate',
+     19 => 'self signed certificate in certificate chain',
+     20 => 'unable to get local issuer certificate',
+     21 => 'unable to verify the first certificate',
+     22 => 'certificate chain too long',
+     23 => 'certificate revoked',
+     24 => 'invalid CA certificate',
+     25 => 'path length constraint exceeded',
+     26 => 'unsupported certificate purpose',
+     27 => 'certificate not trusted',
+     28 => 'certificate rejected',
+     29 => 'subject issuer mismatch',
+     30 => 'authority and subject key identifier mismatch',
+     31 => 'authority and issuer serial number mismatch',
+     32 => 'usage does not include certificate signing',
+     50 => 'application verification failure',
+);
 
 # Per OpenSSL module, make a simple call to ensure libeay32.dll is loaded before
 # ssleay32.dll on Windows.
@@ -23,7 +60,10 @@ OpenSSL::SSL::SSL_library_init();
 # There are smarter things possible.
 my $lib-lock = Lock.new;
 
-class X::IO::Socket::Async::SSL is Exception {}
+class X::IO::Socket::Async::SSL is Exception {
+    has Str $.message;
+}
+class X::IO::Socket::Async::SSL::Verification is X::IO::Socket::Async::SSL {}
 
 class IO::Socket::Async::SSL {
     has IO::Socket::Async $!sock;
@@ -71,6 +111,7 @@ class IO::Socket::Async::SSL {
             my $connected-promise = Promise.new;
             $lib-lock.protect: {
                 my $ctx = self!build-client-ctx($version);
+                SSL_CTX_set_default_verify_paths($ctx);
                 my $ssl = OpenSSL::SSL::SSL_new($ctx);
                 my $read-bio = BIO_new(BIO_s_mem());
                 my $write-bio = BIO_new(BIO_s_mem());
@@ -182,7 +223,24 @@ class IO::Socket::Async::SSL {
         }
         orwith $!connected-promise {
             if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl), 1) > 0 {
-                $!connected-promise.keep(self);
+                my $cert = SSL_get_peer_certificate($!ssl);
+                if $cert {
+                    my $verify = SSL_get_verify_result($!ssl);
+                    if $verify == 0 {
+                        $!connected-promise.keep(self);
+                    }
+                    else {
+                        my $reason = %VERIFY_FAILURE_REASONS{$verify} // 'unknown failure';
+                        $!connected-promise.break(X::IO::Socket::Async::SSL::Verification.new(
+                            message => "Server certificate verification failed: $reason"
+                        ));
+                    }
+                }
+                else {
+                    $!connected-promise.break(X::IO::Socket::Async::SSL::Verification.new(
+                        message => 'Server did not provide a certificate to verify'
+                    ));
+                }
             }
             self!flush-read-bio();
             CATCH {
