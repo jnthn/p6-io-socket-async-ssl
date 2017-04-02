@@ -153,5 +153,35 @@ class IO::Socket::Async::SSL {
                 self!flush-read-bio();
             }
         }
-    }    
+    }
+
+    method close(IO::Socket::Async::SSL:D:) {
+        $!sock.close;
+        self!cleanup();
+    }
+
+    method DESTROY() {
+        self!cleanup();
+    }
+
+    method !cleanup() {
+        $lib-lock.protect: {
+            if $!read-bio {
+                OpenSSL::Bio::BIO_free($!read-bio);
+                $!read-bio = Nil;
+            }
+            if $!write-bio {
+                OpenSSL::Bio::BIO_free($!write-bio);
+                $!write-bio = Nil;
+            }
+            if $!ssl {
+                OpenSSL::SSL::SSL_free($!ssl);
+                $!ssl = Nil;
+            }
+            if $!ctx {
+                OpenSSL::Ctx::SSL_CTX_free($!ctx);
+                $!ctx = Nil;
+            }
+        }
+    }
 }
