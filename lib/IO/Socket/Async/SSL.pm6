@@ -94,6 +94,7 @@ class IO::Socket::Async::SSL {
     has $.insecure;
     has $!host;
     has Supplier::Preserving $!bytes-received .= new;
+    has @!outstanding-writes;
 
     method new() {
         die "Cannot create an asynchronous SSL socket directly; please use\n" ~
@@ -377,25 +378,50 @@ class IO::Socket::Async::SSL {
     }
 
     method write(IO::Socket::Async::SSL:D: Blob $b, :$scheduler = $*SCHEDULER) {
-        start {
-            $lib-lock.protect: {
-                OpenSSL::SSL::SSL_write($!ssl, $b, $b.bytes);
-                self!flush-read-bio();
+        $lib-lock.protect: {
+            if $!shutdown-promise {
+                my $p = Promise.new;
+                $p.break(X::IO::Socket::Async::SSL.new(
+                    message => 'Cannot write to closed socket'
+                ));
+                return $p;
             }
+            my $p = start {
+                $lib-lock.protect: {
+                    OpenSSL::SSL::SSL_write($!ssl, $b, $b.bytes);
+                    self!flush-read-bio();
+                    # The following doesn't race on $p assignment due to the
+                    # holding of $lib-lock in the code with the assignment.
+                    @!outstanding-writes .= grep({ $_ !=== $p });
+                }
+            }
+            @!outstanding-writes.push($p);
+            $p
         }
     }
 
     method close(IO::Socket::Async::SSL:D: --> Nil) {
+        my @wait-writes;
         $lib-lock.protect: {
-            return if $!shutdown-promise;
-            without $!shutdown-promise {
-                $!shutdown-promise = Promise.new;
-                self!handle-buffers();
+            if @!outstanding-writes {
+                @wait-writes = @!outstanding-writes;
+            }
+            else {
+                return if $!shutdown-promise;
+                without $!shutdown-promise {
+                    $!shutdown-promise = Promise.new;
+                    self!handle-buffers();
+                }
             }
         }
-        await $!shutdown-promise;
-        $!sock.close;
-        self!cleanup();
+        if @wait-writes {
+            Promise.allof(@wait-writes).then({ self.close });
+        }
+        else {
+            await $!shutdown-promise;
+            $!sock.close;
+            self!cleanup();
+        }
     }
 
     method DESTROY() {
