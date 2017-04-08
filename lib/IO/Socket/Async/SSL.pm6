@@ -112,6 +112,7 @@ class IO::Socket::Async::SSL {
     has $!connected-promise;
     has $!accepted-promise;
     has $!shutdown-promise;
+    has $!closed;
     has $.enc;
     has $.insecure;
     has $!host;
@@ -404,7 +405,7 @@ class IO::Socket::Async::SSL {
 
     method write(IO::Socket::Async::SSL:D: Blob $b, :$scheduler = $*SCHEDULER) {
         $lib-lock.protect: {
-            if $!shutdown-promise {
+            if $!closed {
                 my $p = Promise.new;
                 $p.break(X::IO::Socket::Async::SSL.new(
                     message => 'Cannot write to closed socket'
@@ -428,6 +429,7 @@ class IO::Socket::Async::SSL {
     method close(IO::Socket::Async::SSL:D: --> Nil) {
         my @wait-writes;
         $lib-lock.protect: {
+            $!closed = True;
             if @!outstanding-writes {
                 @wait-writes = @!outstanding-writes;
             }
