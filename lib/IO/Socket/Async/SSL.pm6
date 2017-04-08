@@ -77,6 +77,7 @@ class IO::Socket::Async::SSL {
     has $!accepted-promise;
     has $!shutdown-promise;
     has $.enc;
+    has $.insecure;
     has Supplier::Preserving $!bytes-received .= new;
 
     method new() {
@@ -85,7 +86,7 @@ class IO::Socket::Async::SSL {
     }
 
     submethod BUILD(:$!sock, :$!enc, :$!ctx, :$!ssl, :$!read-bio, :$!write-bio,
-                    :$!connected-promise, :$!accepted-promise) {
+                    :$!connected-promise, :$!accepted-promise, :$!insecure = False) {
         $!sock.Supply(:bin).tap:
             -> Blob $data {
                 $lib-lock.protect: {
@@ -108,7 +109,7 @@ class IO::Socket::Async::SSL {
     method connect(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                    :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                    OpenSSL::ProtocolVersion :$version = -1,
-                   :$ca-file, :$ca-path) {
+                   :$ca-file, :$ca-path, :$insecure) {
         start {
             my $sock = await IO::Socket::Async.connect($host, $port, :$scheduler);
             my $connected-promise = Promise.new;
@@ -132,7 +133,7 @@ class IO::Socket::Async::SSL {
                 }
                 self.bless(
                     :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
-                    :$connected-promise
+                    :$connected-promise, :$insecure
                 )
             }
             await $connected-promise;
@@ -231,23 +232,28 @@ class IO::Socket::Async::SSL {
         }
         orwith $!connected-promise {
             if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl), 1) > 0 {
-                my $cert = SSL_get_peer_certificate($!ssl);
-                if $cert {
-                    my $verify = SSL_get_verify_result($!ssl);
-                    if $verify == 0 {
-                        $!connected-promise.keep(self);
-                    }
-                    else {
-                        my $reason = %VERIFY_FAILURE_REASONS{$verify} // 'unknown failure';
-                        $!connected-promise.break(X::IO::Socket::Async::SSL::Verification.new(
-                            message => "Server certificate verification failed: $reason"
-                        ));
-                    }
+                if $!insecure {
+                    $!connected-promise.keep(self);
                 }
                 else {
-                    $!connected-promise.break(X::IO::Socket::Async::SSL::Verification.new(
-                        message => 'Server did not provide a certificate to verify'
-                    ));
+                    my $cert = SSL_get_peer_certificate($!ssl);
+                    if $cert {
+                        my $verify = SSL_get_verify_result($!ssl);
+                        if $verify == 0 {
+                            $!connected-promise.keep(self);
+                        }
+                        else {
+                            my $reason = %VERIFY_FAILURE_REASONS{$verify} // 'unknown failure';
+                            $!connected-promise.break(X::IO::Socket::Async::SSL::Verification.new(
+                                message => "Server certificate verification failed: $reason"
+                            ));
+                        }
+                    }
+                    else {
+                        $!connected-promise.break(X::IO::Socket::Async::SSL::Verification.new(
+                            message => 'Server did not provide a certificate to verify'
+                        ));
+                    }
                 }
             }
             self!flush-read-bio();
