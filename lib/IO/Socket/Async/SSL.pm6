@@ -3,6 +3,7 @@ use OpenSSL::Bio;
 use OpenSSL::Ctx;
 use OpenSSL::EVP;
 use OpenSSL::SSL;
+use OpenSSL::Stack;
 
 # XXX Contribute these back to the OpenSSL binding.
 use OpenSSL::NativeLib;
@@ -14,7 +15,6 @@ sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) 
 sub SSL_CTX_load_verify_locations(OpenSSL::Ctx::SSL_CTX, Str, Str) returns int32
     is native(&gen-lib) {*}
 sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
-sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer is native(&gen-lib) {*}
 my constant %VERIFY_FAILURE_REASONS = %(
      2 => 'unable to get issuer certificate',
      3 => 'unable to get certificate CRL',
@@ -49,6 +49,20 @@ my constant %VERIFY_FAILURE_REASONS = %(
      32 => 'usage does not include certificate signing',
      50 => 'application verification failure',
 );
+sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer is native(&gen-lib) {*}
+sub X509_get_ext_d2i(Pointer, int32, CArray[int32], CArray[int32]) returns OpenSSL::Stack
+    is native(&gen-lib) {*}
+sub ASN1_STRING_to_UTF8(CArray[CArray[uint8]], Pointer) returns int32
+    is native(&gen-lib) {*}
+my class GENERAL_NAME is repr('CStruct') {
+    has int32 $.type;
+    has Pointer $.data;
+}
+my enum GENERAL_NAME_TYPE <
+    GEN_OTHERNAME GEN_EMAIL GEN_DNS GEN_X400 GEN_DIRNAME GEN_EDIPARTY
+    GEN_URI GEN_IPADD GEN_RID
+>;
+my constant NID_subject_alt_name = 85;
 
 # Per OpenSSL module, make a simple call to ensure libeay32.dll is loaded before
 # ssleay32.dll on Windows.
@@ -78,6 +92,7 @@ class IO::Socket::Async::SSL {
     has $!shutdown-promise;
     has $.enc;
     has $.insecure;
+    has $!host;
     has Supplier::Preserving $!bytes-received .= new;
 
     method new() {
@@ -86,7 +101,8 @@ class IO::Socket::Async::SSL {
     }
 
     submethod BUILD(:$!sock, :$!enc, :$!ctx, :$!ssl, :$!read-bio, :$!write-bio,
-                    :$!connected-promise, :$!accepted-promise, :$!insecure = False) {
+                    :$!connected-promise, :$!accepted-promise, :$!host,
+                    :$!insecure = False) {
         $!sock.Supply(:bin).tap:
             -> Blob $data {
                 $lib-lock.protect: {
@@ -133,7 +149,7 @@ class IO::Socket::Async::SSL {
                 }
                 self.bless(
                     :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
-                    :$connected-promise, :$insecure
+                    :$connected-promise, :$host, :$insecure
                 )
             }
             await $connected-promise;
@@ -238,8 +254,12 @@ class IO::Socket::Async::SSL {
                 else {
                     my $cert = SSL_get_peer_certificate($!ssl);
                     if $cert {
-                        my $verify = SSL_get_verify_result($!ssl);
-                        if $verify == 0 {
+                        if self!hostname-mismatch($cert) -> $message {
+                            $!connected-promise.break(X::IO::Socket::Async::SSL::Verification.new(
+                                :$message
+                            ));
+                        }
+                        elsif (my $verify = SSL_get_verify_result($!ssl)) == 0 {
                             $!connected-promise.keep(self);
                         }
                         else {
@@ -292,6 +312,36 @@ class IO::Socket::Async::SSL {
             last if $bytes-read < 0;
             $!sock.write($buf.subbuf(0, $bytes-read));
         }
+    }
+
+    method !hostname-mismatch($cert) {
+        my $altnames = X509_get_ext_d2i($cert, NID_subject_alt_name, CArray[int32], CArray[int32]);
+        if ($altnames) {
+            my @no-match;
+            loop (my int $i = 0; $i < $altnames.num; $i++) {
+                my $gd = nativecast(GENERAL_NAME, $altnames.data[$i]);
+                my $out = CArray[CArray[uint8]].new;
+                $out[0] = CArray[uint8];
+                my $name-bytes = ASN1_STRING_to_UTF8($out, $gd.data);
+                my $name = Buf.new($out[0][^$name-bytes]).decode('utf-8');
+                given $gd.type {
+                    when GEN_DNS {
+                        return if $name.fc eq $!host.fc;
+                        push @no-match, $name;
+                    }
+                    # TODO IP address case
+                }
+            }
+            if @no-match {
+                return "Host $!host does not match any subject alt name on the " ~
+                    "certificate (@no-match.join(', '))";
+            }
+        }
+        else {
+            # TODO Common names fallback
+            return "Certificate contains no altnames to check host against";
+        }
+        Nil
     }
 
     my constant SSL_ERROR_WANT_READ = 2;
