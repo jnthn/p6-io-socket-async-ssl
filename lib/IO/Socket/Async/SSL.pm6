@@ -306,7 +306,7 @@ class IO::Socket::Async::SSL {
         }
     }
 
-    method !flush-read-bio() {
+    method !flush-read-bio(--> Nil) {
         my $buf = Buf.allocate(32768);
         while OpenSSL::Bio::BIO_read($!write-bio, $buf, 32768) -> $bytes-read {
             last if $bytes-read < 0;
