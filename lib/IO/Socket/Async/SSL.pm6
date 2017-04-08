@@ -11,6 +11,8 @@ sub BIO_new(OpenSSL::Bio::BIO_METHOD) returns OpaquePointer is native(&gen-lib) 
 sub BIO_s_mem() returns OpenSSL::Bio::BIO_METHOD is native(&gen-lib) {*}
 sub SSL_do_handshake(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
 sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) {*}
+sub SSL_CTX_load_verify_locations(OpenSSL::Ctx::SSL_CTX, Str, Str) returns int32
+    is native(&gen-lib) {*}
 sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
 sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer is native(&gen-lib) {*}
 my constant %VERIFY_FAILURE_REASONS = %(
@@ -105,13 +107,19 @@ class IO::Socket::Async::SSL {
 
     method connect(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                    :$enc = 'utf8', :$scheduler = $*SCHEDULER,
-                   OpenSSL::ProtocolVersion :$version = -1) {
+                   OpenSSL::ProtocolVersion :$version = -1,
+                   :$ca-file, :$ca-path) {
         start {
             my $sock = await IO::Socket::Async.connect($host, $port, :$scheduler);
             my $connected-promise = Promise.new;
             $lib-lock.protect: {
                 my $ctx = self!build-client-ctx($version);
                 SSL_CTX_set_default_verify_paths($ctx);
+                if defined($ca-file) || defined($ca-path) {
+                    SSL_CTX_load_verify_locations($ctx,
+                        defined($ca-file) ?? $ca-file.Str !! Str,
+                        defined($ca-path) ?? $ca-path.Str !! Str);
+                }
                 my $ssl = OpenSSL::SSL::SSL_new($ctx);
                 my $read-bio = BIO_new(BIO_s_mem());
                 my $write-bio = BIO_new(BIO_s_mem());
@@ -157,11 +165,11 @@ class IO::Socket::Async::SSL {
                     my $ctx = self!build-server-ctx($version);
                     with $certificate-file {
                         OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
-                            $certificate-file, 1);
+                            $certificate-file.Str, 1);
                     }
                     with $private-key-file {
                         OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
-                            $private-key-file, 1);
+                            $private-key-file.Str, 1);
                     }
                     my $ssl = OpenSSL::SSL::SSL_new($ctx);
                     my $read-bio = BIO_new(BIO_s_mem());
