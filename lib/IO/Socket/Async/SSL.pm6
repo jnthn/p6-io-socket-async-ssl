@@ -72,6 +72,28 @@ OpenSSL::EVP::EVP_aes_128_cbc();
 OpenSSL::SSL::SSL_load_error_strings();
 OpenSSL::SSL::SSL_library_init();
 
+# This streaming decoder will be replaced with some Perl 6 streaming encoding
+# object once that exists.
+my class StreamingDecoder is repr('Decoder') {
+    use nqp;
+
+    method new(str $encoding) {
+        nqp::decoderconfigure(nqp::create(self), $encoding, nqp::hash())
+    }
+
+    method add-bytes(Blob:D $bytes --> Nil) {
+        nqp::decoderaddbytes(self, nqp::decont($bytes));
+    }
+
+    method consume-available-chars() returns Str {
+        nqp::decodertakeavailablechars(self)
+    }
+
+    method consume-all-chars() returns Str {
+        nqp::decodertakeallchars(self)
+    }
+}
+
 # For now, we'll put a lock around all of our interactions with the library.
 # There are smarter things possible.
 my $lib-lock = Lock.new;
@@ -359,22 +381,25 @@ class IO::Socket::Async::SSL {
         $rc
     }
 
-    method Supply(:$bin, :$scheduler = $*SCHEDULER) {
+    method Supply(:$bin, :$enc = $!enc, :$scheduler = $*SCHEDULER) {
         if $bin {
             $!bytes-received.Supply.schedule-on($scheduler)
         }
         else {
             supply {
+                my $norm-enc = Rakudo::Internals.NORMALIZE_ENCODING($enc // 'utf-8');
+                my $dec = StreamingDecoder.new($norm-enc);
                 whenever $!bytes-received.Supply.schedule-on($scheduler) {
-                    # XXX use streaming decoder and correct encoding
-                    emit .decode('latin-1')
+                    $dec.add-bytes($_);
+                    emit $dec.consume-available-chars();
+                    LAST emit $dec.consume-all-chars();
                 }
             }
         }
     }
 
     method print(IO::Socket::Async::SSL:D: Str() $str, :$scheduler = $*SCHEDULER) {
-        self.write($str.encode($!enc), :$scheduler)
+        self.write($str.encode($!enc // 'utf-8'), :$scheduler)
     }
 
     method write(IO::Socket::Async::SSL:D: Blob $b, :$scheduler = $*SCHEDULER) {
