@@ -51,6 +51,10 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
             ca-file => 't/certs-and-keys/ca-crt.pem') },
         X::IO::Socket::Async::SSL::Verification,
         'When we connect to 127.0.0.1, certificate for localhost will not do';
+
+    $echo-server-tap.close;
+    dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
+        'Server not listening after tap is closed';
 }
 
 done-testing;
