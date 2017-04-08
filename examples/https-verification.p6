@@ -4,8 +4,8 @@ use IO::Socket::Async::SSL;
 # $insecure to True to get it to connect even though the cert is bad.
 my $insecure = False;
 
-my $conn = await IO::Socket::Async::SSL.connect('wrong.host.badssl.com', 443, :$insecure);
-$conn.print: "GET / HTTP/1.0\r\n\r\n";
+my $conn = await IO::Socket::Async::SSL.connect('untrusted-root.badssl.com', 443, :$insecure);
+$conn.print: "GET / HTTP/1.0\r\nHost: untrusted-root.badssl.com\r\n\r\n";
 react {
     whenever $conn {
         .print
