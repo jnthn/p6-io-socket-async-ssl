@@ -3,7 +3,7 @@
     "name"          : "IO::Socket::Async::SSL",
     "version"       : "0.1",
     "description"   : "Provides an API like IO::Socket::Async, but with SSL support.",
-    "author"        : "Jonathan Worthington <jnthn@jnthn.net>",
+    "authors"       : [ "Jonathan Worthington <jnthn@jnthn.net>" ],
     "depends"       : [ "OpenSSL", "Test::META" ],
     "provides"      : {
 		"IO::Socket::Async::SSL": "lib/IO/Socket/Async/SSL.pm6"
