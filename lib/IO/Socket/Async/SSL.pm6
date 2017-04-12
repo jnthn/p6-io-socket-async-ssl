@@ -260,9 +260,19 @@ class IO::Socket::Async::SSL {
             }
             with $!shutdown-promise {
                 if check($!ssl, OpenSSL::SSL::SSL_shutdown($!ssl)) >= 0 {
-                    $!shutdown-promise.keep(True);
+                    self!flush-read-bio();
+                    if @!outstanding-writes {
+                        Promise.allof(@!outstanding-writes).then({
+                            $!shutdown-promise.keep(True);
+                        });
+                    }
+                    else {
+                        $!shutdown-promise.keep(True);
+                    }
                 }
-                self!flush-read-bio();
+                else {
+                    self!flush-read-bio();
+                }
             }
             CATCH {
                 default {
@@ -334,7 +344,13 @@ class IO::Socket::Async::SSL {
         my $buf = Buf.allocate(32768);
         while OpenSSL::Bio::BIO_read($!write-bio, $buf, 32768) -> $bytes-read {
             last if $bytes-read < 0;
-            $!sock.write($buf.subbuf(0, $bytes-read));
+            my $p = $!sock.write($buf.subbuf(0, $bytes-read));
+            @!outstanding-writes.push($p);
+            $p.then: {
+                $lib-lock.protect: {
+                    @!outstanding-writes .= grep({ $_ !=== $p });
+                }
+            }
         }
     }
 
