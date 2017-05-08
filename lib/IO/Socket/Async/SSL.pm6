@@ -356,6 +356,7 @@ class IO::Socket::Async::SSL {
 
     method !hostname-mismatch($cert) {
         my $altnames = X509_get_ext_d2i($cert, NID_subject_alt_name, CArray[int32], CArray[int32]);
+        my $fold-host = $!host.fc;
         if ($altnames) {
             my @no-match;
             loop (my int $i = 0; $i < $altnames.num; $i++) {
@@ -366,7 +367,9 @@ class IO::Socket::Async::SSL {
                 my $name = Buf.new($out[0][^$name-bytes]).decode('utf-8');
                 given $gd.type {
                     when GEN_DNS {
-                        return if $name.fc eq $!host.fc;
+                        my $fold-name = $name.fc;
+                        return if $fold-name eq $fold-host ||
+                                  wildcard-match($fold-name, $fold-host);
                         push @no-match, $name;
                     }
                     # TODO IP address case
@@ -382,6 +385,26 @@ class IO::Socket::Async::SSL {
             return "Certificate contains no altnames to check host against";
         }
         Nil
+    }
+
+    # Implements the rules from RFC 6125 section 6.4.3.
+    sub wildcard-match($name, $host) {
+        return False without $name.index('*');
+        my ($name-wild, $rest-name) = $name.split('.', 2);
+        my ($host-wild, $rest-host) = $host.split('.', 2);
+        return False unless $rest-name eq $rest-host;
+        if $name-wild eq '*' {
+            return True;
+        }
+        elsif $host-wild.chars < $name-wild.chars - 1 {
+            # fo*od can match foxod or food but never fod.
+            return False;
+        }
+        elsif $name-wild ~~ /^ (<-[*]>*) '*' (<-[*]>*) $/ {
+            return $host-wild.starts-with(~$0) &&
+                   $host-wild.ends-with(~$1);
+        }
+        return False;
     }
 
     my constant SSL_ERROR_WANT_READ = 2;
