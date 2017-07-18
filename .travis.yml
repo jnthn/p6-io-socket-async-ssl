@@ -10,4 +10,4 @@ install:
   - zef --debug --depsonly install .
 
 script:
-  - PERL6LIB=src prove -v -r --exec=perl6 t/ it/
+  - PERL6LIB=lib prove -v -r --exec=perl6 t/ it/
