@@ -62,6 +62,7 @@ my enum GENERAL_NAME_TYPE <
     GEN_OTHERNAME GEN_EMAIL GEN_DNS GEN_X400 GEN_DIRNAME GEN_EDIPARTY
     GEN_URI GEN_IPADD GEN_RID
 >;
+my constant SSL_CTRL_SET_TLSEXT_HOSTNAME = 55;
 my constant NID_subject_alt_name = 85;
 
 # Per OpenSSL module, make a simple call to ensure libeay32.dll is loaded before
@@ -143,7 +144,7 @@ class IO::Socket::Async::SSL {
                 my $read-bio = BIO_new(BIO_s_mem());
                 my $write-bio = BIO_new(BIO_s_mem());
                 check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
-                OpenSSL::SSL::SSL_ctrl($ssl, 55, 0, $host);
+                OpenSSL::SSL::SSL_ctrl($ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, 0, $host);
                 OpenSSL::SSL::SSL_set_connect_state($ssl);
                 check($ssl, SSL_do_handshake($ssl));
                 CATCH {
