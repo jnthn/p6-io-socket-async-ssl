@@ -54,6 +54,22 @@ sub X509_get_ext_d2i(Pointer, int32, CArray[int32], CArray[int32]) returns OpenS
     is native(&gen-lib) {*}
 sub ASN1_STRING_to_UTF8(CArray[CArray[uint8]], Pointer) returns int32
     is native(&gen-lib) {*}
+
+# ALPN
+sub SSL_CTX_set_alpn_protos(OpenSSL::Ctx::SSL_CTX, Buf, uint32) returns int32
+    is native(&gen-lib) {*}
+sub SSL_CTX_set_alpn_select_cb(OpenSSL::Ctx::SSL_CTX, &callback (
+                                   OpenSSL::SSL::SSL,        # ssl
+                                   CArray[CArray[uint8]],    # out
+                                   Buf,                      # outlen
+                                   Buf,                      # in
+                                   uint8,                    # inlen
+                                   Pointer[void] --> int32), # arg
+                               Pointer[void])
+    is native(&gen-lib) {*}
+sub SSL_get0_alpn_selected(OpenSSL::SSL::SSL, CArray[CArray[Str]], uint32 is rw)
+    is native(&gen-lib) {*}
+
 my class GENERAL_NAME is repr('CStruct') {
     has int32 $.type;
     has Pointer $.data;
@@ -161,6 +177,8 @@ class IO::Socket::Async::SSL {
                         defined($ca-file) ?? $ca-file.Str !! Str,
                         defined($ca-path) ?? $ca-path.Str !! Str);
                 }
+                my $buf = build-protocol-list(@alpn);
+                SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems) if @alpn;
                 my $ssl = OpenSSL::SSL::SSL_new($ctx);
                 my $read-bio = BIO_new(BIO_s_mem());
                 my $write-bio = BIO_new(BIO_s_mem());
@@ -282,6 +300,20 @@ class IO::Socket::Async::SSL {
         }
         orwith $!connected-promise {
             if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl), 1) > 0 {
+                # ALPN check
+                if @!alpn.elems != 0 {
+                    my $protocol = CArray[CArray[Str]].new;
+                    $protocol[0] = CArray[Str].new;
+                    $protocol[0][10] = '0';
+                    my int32 $len;
+                    SSL_get0_alpn_selected($!ssl, $protocol, $len);
+                    if $len == 0 {
+                        $!alpn-result = Nil;
+                        $!connected-promise.break;
+                    } else {
+                        $!alpn-result = $protocol[0][0];
+                    }
+                }
                 if $!insecure {
                     $!connected-promise.keep(self);
                 }
