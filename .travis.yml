@@ -1,0 +1,13 @@
+dist: trusty
+language: perl6
+
+perl6:
+  - latest
+  - 2017.07
+
+install:
+  - rakudobrew build-zef
+  - zef --debug --depsonly install .
+
+script:
+  - PERL6LIB=src prove -v -r --exec=perl6 t/ it/
