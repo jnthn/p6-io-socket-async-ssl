@@ -195,7 +195,6 @@ class IO::Socket::Async::SSL {
                     my $read-bio = BIO_new(BIO_s_mem());
                     my $write-bio = BIO_new(BIO_s_mem());
                     check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
-                    OpenSSL::SSL::SSL_ctrl($ssl, 55, 0, $host);
                     OpenSSL::SSL::SSL_set_accept_state($ssl);
                     CATCH {
                         OpenSSL::SSL::SSL_free($ssl) if $ssl;
