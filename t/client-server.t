@@ -57,4 +57,84 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
         'Server not listening after tap is closed';
 }
 
+{
+    my $server = IO::Socket::Async::SSL.listen(
+        'localhost', TEST_PORT+1,
+        private-key-file => 't/certs-and-keys/server-key.pem',
+        certificate-file => 't/certs-and-keys/server-crt.pem',
+        alpn => <h2 http/1.1>
+    );
+
+    my $echo-server-tap = $server.tap: -> $conn {
+        $conn.supply(:bin).tap: -> $data { $conn.write($data); }
+    };
+
+    my $conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
+                                                    ca-file => 't/certs-and-keys/ca-crt.pem',
+                                                    alpn => <h2 http/1.1>);
+    is $conn.alpn-result, 'h2', 'Simple server-side ALPN works';
+    $conn.?close;
+    $echo-server-tap.close;
+}
+
+{
+    my $server = IO::Socket::Async::SSL.listen(
+        'localhost', TEST_PORT+1,
+        private-key-file => 't/certs-and-keys/server-key.pem',
+        certificate-file => 't/certs-and-keys/server-crt.pem',
+        alpn => sub (@options) {
+            ok @options.join(', ') eq 'h2, http/1.1', 'Passed protocols are correct';
+            any(@options) eq 'h2' ?? 'h2' !! Nil;
+        }
+    );
+
+    my $echo-server-tap = $server.tap: -> $conn {
+        $conn.supply(:bin).tap: -> $data {
+            $conn.write($data);
+        }
+    };
+
+    my $conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
+                                                    ca-file => 't/certs-and-keys/ca-crt.pem',
+                                                    alpn => <h2 http/1.1>);
+    is $conn.alpn-result, 'h2', 'Server-side ALPN with a subroutine works';
+    $conn.?close;
+    $echo-server-tap.close;
+}
+
+{
+    my $server = IO::Socket::Async::SSL.listen(
+        'localhost', TEST_PORT+1,
+        private-key-file => 't/certs-and-keys/server-key.pem',
+        certificate-file => 't/certs-and-keys/server-crt.pem',
+        alpn => <h2 http/1.1>
+    );
+
+    my $echo-server-tap = $server.tap: -> $conn {
+        $conn.supply(:bin).tap: -> $data {
+            $conn.write($data);
+        }
+    };
+
+    my $p1 = Promise.new;
+    my $p2 = Promise.new;
+    start {
+        my $conn1 = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
+                                                         ca-file => 't/certs-and-keys/ca-crt.pem',
+                                                         alpn => <h2 http/1.1>);
+        $conn1.?close;
+        $p1.keep;
+    }
+    start {
+        my $conn2 = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
+                                                         ca-file => 't/certs-and-keys/ca-crt.pem',
+                                                         alpn => <h2 http/1.1>);
+        $conn2.?close;
+        $p2.keep;
+    }
+    await Promise.anyof(Promise.in(5), Promise.allof($p1, $p2));
+    ok $p1.status ~~ Kept, 'Multiply clients with ALPN work';
+    $echo-server-tap.close;
+}
+
 done-testing;

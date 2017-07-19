@@ -61,13 +61,13 @@ sub SSL_CTX_set_alpn_protos(OpenSSL::Ctx::SSL_CTX, Buf, uint32) returns int32
 sub SSL_CTX_set_alpn_select_cb(OpenSSL::Ctx::SSL_CTX, &callback (
                                    OpenSSL::SSL::SSL,        # ssl
                                    CArray[CArray[uint8]],    # out
-                                   Buf,                      # outlen
-                                   Buf,                      # in
+                                   CArray[uint8],            # outlen
+                                   CArray[uint8],            # in
                                    uint8,                    # inlen
-                                   Pointer[void] --> int32), # arg
-                               Pointer[void])
+                                   Pointer --> int32),       # arg
+                               Pointer)
     is native(&gen-lib) {*}
-sub SSL_get0_alpn_selected(OpenSSL::SSL::SSL, CArray[CArray[Str]], uint32 is rw)
+sub SSL_get0_alpn_selected(OpenSSL::SSL::SSL, CArray[CArray[uint8]], uint32 is rw)
     is native(&gen-lib) {*}
 
 my class GENERAL_NAME is repr('CStruct') {
@@ -132,6 +132,10 @@ class IO::Socket::Async::SSL {
     has $.enc;
     has $.insecure;
     has $!host;
+    has $!alpn;
+    # We need a non-attribute variable to use it during selection
+    my $server-protocols;
+    has $.alpn-result;
     has Supplier::Preserving $!bytes-received .= new;
     has @!outstanding-writes;
 
@@ -141,7 +145,7 @@ class IO::Socket::Async::SSL {
     }
 
     submethod BUILD(:$!sock, :$!enc, :$!ctx, :$!ssl, :$!read-bio, :$!write-bio,
-                    :$!connected-promise, :$!accepted-promise, :$!host,
+                    :$!connected-promise, :$!accepted-promise, :$!host, :$!alpn,
                     :$!insecure = False) {
         $!sock.Supply(:bin).tap:
             -> Blob $data {
@@ -165,7 +169,7 @@ class IO::Socket::Async::SSL {
     method connect(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                    :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                    OpenSSL::ProtocolVersion :$version = -1,
-                   :$ca-file, :$ca-path, :$insecure) {
+                   :$ca-file, :$ca-path, :$insecure, :$alpn) {
         start {
             my $sock = await IO::Socket::Async.connect($host, $port, :$scheduler);
             my $connected-promise = Promise.new;
@@ -177,8 +181,10 @@ class IO::Socket::Async::SSL {
                         defined($ca-file) ?? $ca-file.Str !! Str,
                         defined($ca-path) ?? $ca-path.Str !! Str);
                 }
-                my $buf = build-protocol-list(@alpn);
-                SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems) if @alpn;
+                if $alpn.defined {
+                    my $buf = build-protocol-list(@$alpn);
+                    SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems);
+                }
                 my $ssl = OpenSSL::SSL::SSL_new($ctx);
                 my $read-bio = BIO_new(BIO_s_mem());
                 my $write-bio = BIO_new(BIO_s_mem());
@@ -191,7 +197,7 @@ class IO::Socket::Async::SSL {
                 }
                 self.bless(
                     :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
-                    :$connected-promise, :$host, :$insecure
+                    :$connected-promise, :$host, :$insecure, :$alpn
                 )
             }
             await $connected-promise;
@@ -213,10 +219,34 @@ class IO::Socket::Async::SSL {
         OpenSSL::Ctx::SSL_CTX_new($method)
     }
 
+    sub alpn-selector($ssl, $out, $outlen, $in, $inlen, $arg) {
+        my $buf = Buf.new;
+        for (0...$inlen-1) {
+            $buf.push: $in[$_];
+        }
+        my $protos = parse-protocol-list($buf, $inlen);
+        my $result;
+
+        if $server-protocols ~~ Callable {
+            $result = $server-protocols($protos);
+        } else {
+            return 3 if $server-protocols.elems == 0; # SSL_TLSEXT_ERR_NOACK
+            for @$protos -> $p {
+                $server-protocols.map({ if ($_ eq $p) { $result = $p; } });
+                last if $result;
+            }
+        }
+
+        return 2 unless $result; # SSL_TLSEXT_ERR_ALERT_FATAL
+        $out[0] = CArray[uint8].new($result.encode('ascii').list);
+        $outlen[0] = $result.chars;
+        0; # SSL_TLSEXT_ERR_OK
+    }
+
     method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
-                  :$certificate-file, :$private-key-file) {
+                  :$certificate-file, :$private-key-file, :$alpn) {
         supply {
             whenever IO::Socket::Async.listen($host, $port, :$scheduler) -> $sock {
                 my $accepted-promise = Promise.new;
@@ -230,6 +260,13 @@ class IO::Socket::Async::SSL {
                         OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
                             $private-key-file.Str, 1);
                     }
+
+                    if $alpn.defined {
+                        SSL_CTX_set_alpn_select_cb(
+                            $ctx,
+                            &alpn-selector,
+                            Pointer);
+                    }
                     my $ssl = OpenSSL::SSL::SSL_new($ctx);
                     my $read-bio = BIO_new(BIO_s_mem());
                     my $write-bio = BIO_new(BIO_s_mem());
@@ -239,10 +276,12 @@ class IO::Socket::Async::SSL {
                         OpenSSL::SSL::SSL_free($ssl) if $ssl;
                         OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
                     }
+                    $server-protocols = $alpn;
                     self.bless(
                         :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
-                        :$accepted-promise
+                        :$accepted-promise, :$alpn
                     )
+
                 }
                 whenever $accepted-promise -> $ssl-socket {
                     emit $ssl-socket;
@@ -301,18 +340,22 @@ class IO::Socket::Async::SSL {
         orwith $!connected-promise {
             if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl), 1) > 0 {
                 # ALPN check
-                if @!alpn.elems != 0 {
-                    my $protocol = CArray[CArray[Str]].new;
-                    $protocol[0] = CArray[Str].new;
-                    $protocol[0][10] = '0';
+                if $!alpn.defined && $!alpn-result !~~ Nil|Buf {
+                    my $protocol = CArray[CArray[uint8]].new;
+                    $protocol[0] = CArray[uint8].new;
                     my int32 $len;
                     SSL_get0_alpn_selected($!ssl, $protocol, $len);
                     if $len == 0 {
                         $!alpn-result = Nil;
                         $!connected-promise.break;
                     } else {
-                        $!alpn-result = $protocol[0][0];
+                        $!alpn-result = '';
+                        for (0...$len-1) -> $i {
+                            $!alpn-result ~= Buf.new($protocol[0][$i]).decode;
+                        }
                     }
+                } else {
+                    $!alpn-result := Nil;
                 }
                 if $!insecure {
                     $!connected-promise.keep(self);
@@ -414,6 +457,48 @@ class IO::Socket::Async::SSL {
             return "Certificate contains no altnames to check host against";
         }
         Nil
+    }
+
+    # Implements the rules from RFC 6125 section 6.4.3.
+    sub wildcard-match($name, $host) {
+        return False without $name.index('*');
+        my ($name-wild, $rest-name) = $name.split('.', 2);
+        my ($host-wild, $rest-host) = $host.split('.', 2);
+        return False unless $rest-name eq $rest-host;
+        if $name-wild eq '*' {
+            return True;
+        }
+        elsif $host-wild.chars < $name-wild.chars - 1 {
+            # fo*od can match foxod or food but never fod.
+            return False;
+        }
+        elsif $name-wild ~~ /^ (<-[*]>*) '*' (<-[*]>*) $/ {
+            return $host-wild.starts-with(~$0) &&
+                   $host-wild.ends-with(~$1);
+        }
+        return False;
+    }
+
+    sub parse-protocol-list($array, $len --> List) {
+        my @result;
+        my $names = $array;
+        my $rest = $len;
+        while $rest {
+            my $size = $names[0];
+            @result.push: $names.subbuf(1, $size).decode;
+            $names .= subbuf($size+1);
+            $rest -= $size + 1;
+        }
+        @result;
+    }
+
+    sub build-protocol-list(@protocols --> Buf) {
+        my $list = Buf.new;
+        for @protocols -> $p {
+            $list.push: $p.chars;
+            $list.push: $p.encode('ascii')
+        }
+        $list;
     }
 
     my constant SSL_ERROR_WANT_READ = 2;
