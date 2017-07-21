@@ -15,6 +15,11 @@ sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) 
 sub SSL_CTX_load_verify_locations(OpenSSL::Ctx::SSL_CTX, Str, Str) returns int32
     is native(&gen-lib) {*}
 sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
+
+my constant SSL_TLSEXT_ERR_OK = 0;
+my constant SSL_TLSEXT_ERR_ALERT_FATAL = 2;
+my constant SSL_TLSEXT_ERR_NOACK = 3;
+
 my constant %VERIFY_FAILURE_REASONS = %(
      2 => 'unable to get issuer certificate',
      3 => 'unable to get certificate CRL',
