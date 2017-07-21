@@ -112,8 +112,6 @@ class IO::Socket::Async::SSL {
     has $.insecure;
     has $!host;
     has $!alpn;
-    # We need a non-attribute variable to use it during selection
-    my $server-protocols;
     has $.alpn-result;
     has Supplier::Preserving $!bytes-received .= new;
     has @!outstanding-writes;
@@ -199,34 +197,34 @@ class IO::Socket::Async::SSL {
         OpenSSL::Ctx::SSL_CTX_new($method)
     }
 
-    sub alpn-selector($ssl, $out, $outlen, $in, $inlen, $arg) {
-        my $buf = Buf.new;
-        for (0...$inlen-1) {
-            $buf.push: $in[$_];
-        }
-        my $protos = parse-protocol-list($buf, $inlen);
-        my $result;
-
-        if $server-protocols ~~ Callable {
-            $result = $server-protocols($protos);
-        } else {
-            return 3 if $server-protocols.elems == 0; # SSL_TLSEXT_ERR_NOACK
-            for @$protos -> $p {
-                $server-protocols.map({ if ($_ eq $p) { $result = $p; } });
-                last if $result;
-            }
-        }
-
-        return 2 unless $result; # SSL_TLSEXT_ERR_ALERT_FATAL
-        $out[0] = CArray[uint8].new($result.encode('ascii').list);
-        $outlen[0] = $result.chars;
-        0; # SSL_TLSEXT_ERR_OK
-    }
-
     method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
                   :$certificate-file, :$private-key-file, :$alpn) {
+        sub alpn-selector($ssl, $out, $outlen, $in, $inlen, $arg) {
+            my $buf = Buf.new;
+            for (0...$inlen-1) {
+                $buf.push: $in[$_];
+            }
+            my $protos = parse-protocol-list($buf, $inlen);
+            my $result;
+
+            if $alpn ~~ Callable {
+                $result = $alpn($protos);
+            } else {
+                return SSL_TLSEXT_ERR_NOACK if $alpn.elems == 0;
+                for @$protos -> $p {
+                    $alpn.map({ if ($_ eq $p) { $result = $p; } });
+                    last if $result;
+                }
+            }
+
+            return SSL_TLSEXT_ERR_ALERT_FATAL unless $result;
+            $out[0] = CArray[uint8].new($result.encode('ascii').list);
+            $outlen[0] = $result.chars;
+            SSL_TLSEXT_ERR_OK;
+        }
+
         supply {
             whenever IO::Socket::Async.listen($host, $port, :$scheduler) -> $sock {
                 my $accepted-promise = Promise.new;
@@ -256,7 +254,6 @@ class IO::Socket::Async::SSL {
                         OpenSSL::SSL::SSL_free($ssl) if $ssl;
                         OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
                     }
-                    $server-protocols = $alpn;
                     self.bless(
                         :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
                         :$accepted-promise, :$alpn
