@@ -323,7 +323,7 @@ class IO::Socket::Async::SSL {
             if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl), 1) > 0 {
                 # ALPN check
                 if $!alpn.defined && $!alpn-result !~~ Nil|Buf {
-                    self!check-alpn(:client);
+                    self!check-alpn;
                 } else {
                     $!alpn-result := Nil;
                 }
@@ -371,7 +371,7 @@ class IO::Socket::Async::SSL {
             if check($!ssl, OpenSSL::SSL::SSL_accept($!ssl)) >= 0 {
                 # ALPN
                 if $!alpn.defined && $!alpn-result !~~ Nil|Buf {
-                    self!check-alpn(:server);
+                    self!check-alpn;
                 } else {
                     $!alpn-result := Nil;
                 }
@@ -391,14 +391,13 @@ class IO::Socket::Async::SSL {
         }
     }
 
-    method !check-alpn(:$client, :$server) {
+    method !check-alpn() {
         my $protocol = CArray[CArray[uint8]].new;
         $protocol[0] = CArray[uint8].new;
         my int32 $len;
         SSL_get0_alpn_selected($!ssl, $protocol, $len);
         if $len == 0 {
-            $!accepted-promise.break if $server;
-            $!alpn-result = Nil if $client;
+            $!alpn-result = Nil;
         } else {
             for (0...$len-1) {
                 $!alpn-result ~= chr($protocol[0][$_]);
