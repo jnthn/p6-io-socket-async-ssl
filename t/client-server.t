@@ -133,7 +133,7 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
         $p2.keep;
     }
     await Promise.anyof(Promise.in(5), Promise.allof($p1, $p2));
-    ok $p1.status ~~ Kept, 'Multiply clients with ALPN work';
+    ok $p1.status ~~ Kept, 'Multiple clients with ALPN work';
     $echo-server-tap.close;
 }
 
