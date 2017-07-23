@@ -323,24 +323,12 @@ class IO::Socket::Async::SSL {
             if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl), 1) > 0 {
                 # ALPN check
                 if $!alpn.defined && $!alpn-result !~~ Nil|Buf {
-                    my $protocol = CArray[CArray[uint8]].new;
-                    $protocol[0] = CArray[uint8].new;
-                    my int32 $len;
-                    SSL_get0_alpn_selected($!ssl, $protocol, $len);
-                    if $len == 0 {
-                        $!alpn-result = Nil;
-                        $!connected-promise.break;
-                    } else {
-                        $!alpn-result = '';
-                        for (0...$len-1) -> $i {
-                            $!alpn-result ~= chr($protocol[0][$i]);
-                        }
-                    }
+                    self!check-alpn(:client);
                 } else {
                     $!alpn-result := Nil;
                 }
                 if $!insecure {
-                    $!connected-promise.keep(self);
+                    $!connected-promise.keep(self) if $!connected-promise.status ~~ Planned;
                 }
                 else {
                     my $cert = SSL_get_peer_certificate($!ssl);
@@ -381,7 +369,13 @@ class IO::Socket::Async::SSL {
         }
         orwith $!accepted-promise {
             if check($!ssl, OpenSSL::SSL::SSL_accept($!ssl)) >= 0 {
-                $!accepted-promise.keep(self);
+                # ALPN
+                if $!alpn.defined && $!alpn-result !~~ Nil|Buf {
+                    self!check-alpn(:server);
+                } else {
+                    $!alpn-result := Nil;
+                }
+                $!accepted-promise.keep(self) if $!accepted-promise.status ~~ Planned;
             }
             self!flush-read-bio();
             CATCH {
@@ -390,9 +384,24 @@ class IO::Socket::Async::SSL {
                         $!bytes-received.quit($_);
                     }
                     else {
-                        $!accepted-promise.break($_);
+                        $!accepted-promise.break($_) if $!accepted-promise.status ~~ Planned;
                     }
                 }
+            }
+        }
+    }
+
+    method !check-alpn(:$client, :$server) {
+        my $protocol = CArray[CArray[uint8]].new;
+        $protocol[0] = CArray[uint8].new;
+        my int32 $len;
+        SSL_get0_alpn_selected($!ssl, $protocol, $len);
+        if $len == 0 {
+            $!accepted-promise.break if $server;
+            $!alpn-result = Nil if $client;
+        } else {
+            for (0...$len-1) {
+                $!alpn-result ~= chr($protocol[0][$_]);
             }
         }
     }

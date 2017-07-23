@@ -111,6 +111,7 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
     );
 
     my $echo-server-tap = $server.tap: -> $conn {
+        isnt $conn.alpn-result, Nil, 'ALPN on server-side is set';
         $conn.supply(:bin).tap: -> $data {
             $conn.write($data);
         }
@@ -121,7 +122,8 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
     start {
         my $conn1 = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
                                                          ca-file => 't/certs-and-keys/ca-crt.pem',
-                                                         alpn => <h2 http/1.1>);
+                                                         alpn => <http/1.1>);
+        ok $conn1.alpn-result eq 'http/1.1', 'Negotiation is correct';
         $conn1.?close;
         $p1.keep;
     }
@@ -129,6 +131,7 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
         my $conn2 = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
                                                          ca-file => 't/certs-and-keys/ca-crt.pem',
                                                          alpn => <h2 http/1.1>);
+        ok $conn2.alpn-result eq 'h2', 'Negotiation is correct';
         $conn2.?close;
         $p2.keep;
     }
