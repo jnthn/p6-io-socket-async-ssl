@@ -333,7 +333,7 @@ class IO::Socket::Async::SSL {
                     } else {
                         $!alpn-result = '';
                         for (0...$len-1) -> $i {
-                            $!alpn-result ~= Buf.new($protocol[0][$i]).decode;
+                            $!alpn-result ~= chr($protocol[0][$i]);
                         }
                     }
                 } else {
