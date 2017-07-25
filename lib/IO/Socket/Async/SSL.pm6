@@ -577,6 +577,16 @@ class IO::Socket::Async::SSL {
         }
     }
 
+    method supports-alpn() {
+        once so try {
+            my $ctx = self!build-client-ctx(-1);
+            my $buf = build-protocol-list(['h2']);
+            SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems);
+            LEAVE OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
+            True
+        }
+    }
+
     method DESTROY() {
         self!cleanup();
     }
