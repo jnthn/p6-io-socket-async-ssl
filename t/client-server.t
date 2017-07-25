@@ -57,7 +57,7 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
         'Server not listening after tap is closed';
 }
 
-{
+if IO::Socket::Async::SSL.supports-alpn {
     my $server = IO::Socket::Async::SSL.listen(
         'localhost', TEST_PORT+1,
         private-key-file => 't/certs-and-keys/server-key.pem',
@@ -75,9 +75,11 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
     is $conn.alpn-result, 'h2', 'Simple server-side ALPN works';
     $conn.?close;
     $echo-server-tap.close;
+} else {
+    skip "no alpn support in this ssl version";
 }
 
-{
+if IO::Socket::Async::SSL.supports-alpn {
     my $server = IO::Socket::Async::SSL.listen(
         'localhost', TEST_PORT+1,
         private-key-file => 't/certs-and-keys/server-key.pem',
@@ -100,9 +102,11 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
     is $conn.alpn-result, 'h2', 'Server-side ALPN with a subroutine works';
     $conn.?close;
     $echo-server-tap.close;
+} else {
+    skip "no alpn support in this ssl version", 2;
 }
 
-{
+if IO::Socket::Async::SSL.supports-alpn {
     my $server = IO::Socket::Async::SSL.listen(
         'localhost', TEST_PORT+1,
         private-key-file => 't/certs-and-keys/server-key.pem',
@@ -135,6 +139,8 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
     ok $p1.status ~~ Kept, 'Multiple clients with ALPN work';
     ok $p2.status ~~ Kept, 'Multiple clients with ALPN work';
     $echo-server-tap.close;
+} else {
+    skip "no alpn support in this ssl version", 5;
 }
 
 done-testing;
