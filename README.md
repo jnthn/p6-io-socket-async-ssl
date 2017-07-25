@@ -1,4 +1,4 @@
-# IO::Socket::Async::SSL
+# IO::Socket::Async::SSL [![Build Status](https://travis-ci.org/jnthn/p6-io-socket-async-ssl.svg?branch=master)](https://travis-ci.org/jnthn/p6-io-socket-async-ssl)
 
 This module provides a secure sockets implementation with an API very much
 like that of the Perl 6 built-in `IO::Socket::Async` class. For the client
