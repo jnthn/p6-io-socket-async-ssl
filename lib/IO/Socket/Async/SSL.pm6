@@ -15,6 +15,11 @@ sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) 
 sub SSL_CTX_load_verify_locations(OpenSSL::Ctx::SSL_CTX, Str, Str) returns int32
     is native(&gen-lib) {*}
 sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
+
+my constant SSL_TLSEXT_ERR_OK = 0;
+my constant SSL_TLSEXT_ERR_ALERT_FATAL = 2;
+my constant SSL_TLSEXT_ERR_NOACK = 3;
+
 my constant %VERIFY_FAILURE_REASONS = %(
      2 => 'unable to get issuer certificate',
      3 => 'unable to get certificate CRL',
@@ -54,6 +59,22 @@ sub X509_get_ext_d2i(Pointer, int32, CArray[int32], CArray[int32]) returns OpenS
     is native(&gen-lib) {*}
 sub ASN1_STRING_to_UTF8(CArray[CArray[uint8]], Pointer) returns int32
     is native(&gen-lib) {*}
+
+# ALPN
+sub SSL_CTX_set_alpn_protos(OpenSSL::Ctx::SSL_CTX, Buf, uint32) returns int32
+    is native(&gen-lib) {*}
+sub SSL_CTX_set_alpn_select_cb(OpenSSL::Ctx::SSL_CTX, &callback (
+                                   OpenSSL::SSL::SSL,        # ssl
+                                   CArray[CArray[uint8]],    # out
+                                   CArray[uint8],            # outlen
+                                   CArray[uint8],            # in
+                                   uint8,                    # inlen
+                                   Pointer --> int32),       # arg
+                               Pointer)
+    is native(&gen-lib) {*}
+sub SSL_get0_alpn_selected(OpenSSL::SSL::SSL, CArray[CArray[uint8]], uint32 is rw)
+    is native(&gen-lib) {*}
+
 my class GENERAL_NAME is repr('CStruct') {
     has int32 $.type;
     has Pointer $.data;
@@ -95,6 +116,8 @@ class IO::Socket::Async::SSL {
     has $.enc;
     has $.insecure;
     has $!host;
+    has $!alpn;
+    has $.alpn-result;
     has Supplier::Preserving $!bytes-received .= new;
     has @!outstanding-writes;
 
@@ -104,7 +127,7 @@ class IO::Socket::Async::SSL {
     }
 
     submethod BUILD(:$!sock, :$!enc, :$!ctx, :$!ssl, :$!read-bio, :$!write-bio,
-                    :$!connected-promise, :$!accepted-promise, :$!host,
+                    :$!connected-promise, :$!accepted-promise, :$!host, :$!alpn,
                     :$!insecure = False) {
         $!sock.Supply(:bin).tap:
             -> Blob $data {
@@ -128,7 +151,7 @@ class IO::Socket::Async::SSL {
     method connect(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                    :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                    OpenSSL::ProtocolVersion :$version = -1,
-                   :$ca-file, :$ca-path, :$insecure) {
+                   :$ca-file, :$ca-path, :$insecure, :$alpn) {
         start {
             my $sock = await IO::Socket::Async.connect($host, $port, :$scheduler);
             my $connected-promise = Promise.new;
@@ -139,6 +162,10 @@ class IO::Socket::Async::SSL {
                     SSL_CTX_load_verify_locations($ctx,
                         defined($ca-file) ?? $ca-file.Str !! Str,
                         defined($ca-path) ?? $ca-path.Str !! Str);
+                }
+                if $alpn.defined {
+                    my $buf = build-protocol-list(@$alpn);
+                    SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems);
                 }
                 my $ssl = OpenSSL::SSL::SSL_new($ctx);
                 my $read-bio = BIO_new(BIO_s_mem());
@@ -153,7 +180,7 @@ class IO::Socket::Async::SSL {
                 }
                 self.bless(
                     :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
-                    :$connected-promise, :$host, :$insecure
+                    :$connected-promise, :$host, :$insecure, :$alpn
                 )
             }
             await $connected-promise;
@@ -178,7 +205,31 @@ class IO::Socket::Async::SSL {
     method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
-                  :$certificate-file, :$private-key-file) {
+                  :$certificate-file, :$private-key-file, :$alpn) {
+        sub alpn-selector($ssl, $out, $outlen, $in, $inlen, $arg) {
+            my $buf = Buf.new;
+            for (0...$inlen-1) {
+                $buf.push: $in[$_];
+            }
+            my $protos = parse-protocol-list($buf, $inlen);
+            my $result;
+
+            if $alpn ~~ Callable {
+                $result = $alpn($protos);
+            } else {
+                return SSL_TLSEXT_ERR_NOACK if $alpn.elems == 0;
+                for @$protos -> $p {
+                    $alpn.map({ if ($_ eq $p) { $result = $p; } });
+                    last if $result;
+                }
+            }
+
+            return SSL_TLSEXT_ERR_ALERT_FATAL unless $result;
+            $out[0] = CArray[uint8].new($result.encode('ascii').list);
+            $outlen[0] = $result.chars;
+            SSL_TLSEXT_ERR_OK;
+        }
+
         supply {
             whenever IO::Socket::Async.listen($host, $port, :$scheduler) -> $sock {
                 my $accepted-promise = Promise.new;
@@ -192,6 +243,13 @@ class IO::Socket::Async::SSL {
                         OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
                             $private-key-file.Str, 1);
                     }
+
+                    if $alpn.defined {
+                        SSL_CTX_set_alpn_select_cb(
+                            $ctx,
+                            &alpn-selector,
+                            Pointer);
+                    }
                     my $ssl = OpenSSL::SSL::SSL_new($ctx);
                     my $read-bio = BIO_new(BIO_s_mem());
                     my $write-bio = BIO_new(BIO_s_mem());
@@ -203,8 +261,9 @@ class IO::Socket::Async::SSL {
                     }
                     self.bless(
                         :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
-                        :$accepted-promise
+                        :$accepted-promise, :$alpn
                     )
+
                 }
                 whenever $accepted-promise -> $ssl-socket {
                     emit $ssl-socket;
@@ -262,8 +321,14 @@ class IO::Socket::Async::SSL {
         }
         orwith $!connected-promise {
             if check($!ssl, OpenSSL::SSL::SSL_connect($!ssl), 1) > 0 {
+                # ALPN check
+                if $!alpn.defined && $!alpn-result !~~ Nil|Buf {
+                    self!check-alpn;
+                } else {
+                    $!alpn-result := Nil;
+                }
                 if $!insecure {
-                    $!connected-promise.keep(self);
+                    $!connected-promise.keep(self) if $!connected-promise.status ~~ Planned;
                 }
                 else {
                     my $cert = SSL_get_peer_certificate($!ssl);
@@ -304,7 +369,13 @@ class IO::Socket::Async::SSL {
         }
         orwith $!accepted-promise {
             if check($!ssl, OpenSSL::SSL::SSL_accept($!ssl)) >= 0 {
-                $!accepted-promise.keep(self);
+                # ALPN
+                if $!alpn.defined && $!alpn-result !~~ Nil|Buf {
+                    self!check-alpn;
+                } else {
+                    $!alpn-result := Nil;
+                }
+                $!accepted-promise.keep(self) if $!accepted-promise.status ~~ Planned;
             }
             self!flush-read-bio();
             CATCH {
@@ -313,9 +384,23 @@ class IO::Socket::Async::SSL {
                         $!bytes-received.quit($_);
                     }
                     else {
-                        $!accepted-promise.break($_);
+                        $!accepted-promise.break($_) if $!accepted-promise.status ~~ Planned;
                     }
                 }
+            }
+        }
+    }
+
+    method !check-alpn() {
+        my $protocol = CArray[CArray[uint8]].new;
+        $protocol[0] = CArray[uint8].new;
+        my int32 $len;
+        SSL_get0_alpn_selected($!ssl, $protocol, $len);
+        if $len == 0 {
+            $!alpn-result = Nil;
+        } else {
+            for (0...$len-1) {
+                $!alpn-result ~= chr($protocol[0][$_]);
             }
         }
     }
@@ -385,6 +470,28 @@ class IO::Socket::Async::SSL {
                    $host-wild.ends-with(~$1);
         }
         return False;
+    }
+
+    sub parse-protocol-list($array, $len --> List) {
+        my @result;
+        my $names = $array;
+        my $rest = $len;
+        while $rest {
+            my $size = $names[0];
+            @result.push: $names.subbuf(1, $size).decode;
+            $names .= subbuf($size+1);
+            $rest -= $size + 1;
+        }
+        @result;
+    }
+
+    sub build-protocol-list(@protocols --> Buf) {
+        my $list = Buf.new;
+        for @protocols -> $p {
+            $list.push: $p.chars;
+            $list.push: $p.encode('ascii')
+        }
+        $list;
     }
 
     my constant SSL_ERROR_WANT_READ = 2;
