@@ -289,13 +289,19 @@ class IO::Socket::Async::SSL {
 
     method !handle-buffers() {
         if $!connected-promise || $!accepted-promise {
-            my $buf = Buf.allocate(32768);
-            my $bytes-read = OpenSSL::SSL::SSL_read($!ssl, $buf, 32768);
-            if $bytes-read >= 0 {
-                $!bytes-received.emit($buf.subbuf(0, $bytes-read));
-            }
-            else {
-                check($!ssl, $bytes-read);
+            loop {
+                my $buf = Buf.allocate(32768);
+                my $bytes-read = OpenSSL::SSL::SSL_read($!ssl, $buf, 32768);
+                if $bytes-read > 0 {
+                    $!bytes-received.emit($buf.subbuf(0, $bytes-read));
+                }
+                elsif $bytes-read == 0 {
+                    last;
+                }
+                else {
+                    check($!ssl, $bytes-read);
+                    last;
+                }
             }
             with $!shutdown-promise {
                 if check($!ssl, OpenSSL::SSL::SSL_shutdown($!ssl)) >= 0 {
