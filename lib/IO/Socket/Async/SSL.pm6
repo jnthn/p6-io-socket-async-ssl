@@ -132,12 +132,14 @@ class IO::Socket::Async::SSL {
         $!sock.Supply(:bin).tap:
             -> Blob $data {
                 $lib-lock.protect: {
-                    OpenSSL::Bio::BIO_write($!read-bio, $data, $data.bytes);
-                    self!handle-buffers();
+                    if $!ssl {
+                        OpenSSL::Bio::BIO_write($!read-bio, $data, $data.bytes);
+                        self!handle-buffers();
+                    }
                 }
             },
             done => {
-                $lib-lock.protect: {
+                $lib-lock.protect: -> {
                     self!handle-buffers();
                 }
                 $!bytes-received.done;
@@ -288,7 +290,10 @@ class IO::Socket::Async::SSL {
     }
 
     method !handle-buffers() {
-        if $!connected-promise || $!accepted-promise {
+        if !$!ssl {
+            # Connection no longer active; don't do anything.
+        }
+        elsif $!connected-promise || $!accepted-promise {
             loop {
                 my $buf = Buf.allocate(32768);
                 my $bytes-read = OpenSSL::SSL::SSL_read($!ssl, $buf, 32768);
@@ -607,6 +612,8 @@ class IO::Socket::Async::SSL {
                 OpenSSL::Ctx::SSL_CTX_free($!ctx);
                 $!ctx = Nil;
             }
+            $!read-bio = Nil;
+            $!write-bio = Nil;
         }
     }
 }
