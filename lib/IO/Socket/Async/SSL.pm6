@@ -563,6 +563,19 @@ class IO::Socket::Async::SSL {
         }
     }
 
+    method peer-host() {
+        $!sock.peer-host;
+    }
+    method peer-port() {
+        $!sock.peer-port;
+    }
+    method socket-host() {
+        $!sock.socket-host;
+    }
+    method socket-port() {
+        $!sock.socket-port;
+    }
+
     method close(IO::Socket::Async::SSL:D: --> Nil) {
         my @wait-writes;
         $lib-lock.protect: {

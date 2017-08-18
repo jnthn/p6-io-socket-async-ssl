@@ -80,6 +80,7 @@ if IO::Socket::Async::SSL.supports-alpn {
     );
 
     my $echo-server-tap = $server.tap: -> $conn {
+        ok $conn.socket-host eq '127.0.0.1', 'socket-host works';
         $conn.supply(:bin).tap: -> $data { $conn.write($data); }
     };
 
