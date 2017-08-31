@@ -91,8 +91,13 @@ my constant NID_subject_alt_name = 85;
 OpenSSL::EVP::EVP_aes_128_cbc();
 
 # On first load of the module, initialize the library.
-OpenSSL::SSL::SSL_load_error_strings();
-OpenSSL::SSL::SSL_library_init();
+try {
+    CATCH {
+        default { OpenSSL::SSL::OPENSSL_init_ssl(0, OpaquePointer); }
+    }
+    OpenSSL::SSL::SSL_library_init();
+    OpenSSL::SSL::SSL_load_error_strings();
+}
 
 # For now, we'll put a lock around all of our interactions with the library.
 # There are smarter things possible.
