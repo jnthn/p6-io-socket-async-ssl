@@ -4,6 +4,7 @@ use OpenSSL::Ctx;
 use OpenSSL::EVP;
 use OpenSSL::SSL;
 use OpenSSL::Stack;
+use OpenSSL::Err;
 
 # XXX Contribute these back to the OpenSSL binding.
 use OpenSSL::NativeLib;
@@ -514,11 +515,16 @@ class IO::Socket::Async::SSL {
     my constant SSL_ERROR_WANT_WRITE = 3;
     sub check($ssl, $rc, $expected = 0) {
         if $rc < $expected {
-            my $error = OpenSSL::SSL::SSL_get_error($ssl, $rc);
-            unless $error == any(SSL_ERROR_WANT_READ, SSL_ERROR_WANT_WRITE) {
+            my $error = OpenSSL::Err::ERR_get_error();
+            my @log;
+            while ($error != 0|SSL_ERROR_WANT_READ|SSL_ERROR_WANT_WRITE) {
+                @log.push(OpenSSL::Err::ERR_error_string($error, Nil));
+                $error = OpenSSL::Err::ERR_get_error();
+            }
+            if @log.elems != 0 {
                 die X::IO::Socket::Async::SSL.new(
-                    message => OpenSSL::Err::ERR_error_string($error, Nil)
-                );
+                    message => @log.join("\n")
+                )
             }
         }
         $rc
