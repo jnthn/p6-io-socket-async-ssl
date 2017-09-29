@@ -627,17 +627,19 @@ class IO::Socket::Async::SSL {
     }
 
     method !cleanup() {
-        $lib-lock.protect: {
-            if $!ssl {
-                OpenSSL::SSL::SSL_free($!ssl);
-                $!ssl = Nil;
+        if $!ssl || $!ctx {
+            start $lib-lock.protect: {
+                if $!ssl {
+                    OpenSSL::SSL::SSL_free($!ssl);
+                    $!ssl = Nil;
+                }
+                if $!ctx {
+                    OpenSSL::Ctx::SSL_CTX_free($!ctx);
+                    $!ctx = Nil;
+                }
+                $!read-bio = Nil;
+                $!write-bio = Nil;
             }
-            if $!ctx {
-                OpenSSL::Ctx::SSL_CTX_free($!ctx);
-                $!ctx = Nil;
-            }
-            $!read-bio = Nil;
-            $!write-bio = Nil;
         }
     }
 }
