@@ -532,13 +532,13 @@ class IO::Socket::Async::SSL {
 
     method Supply(:$bin, :$enc = $!enc, :$scheduler = $*SCHEDULER) {
         if $bin {
-            $!bytes-received.Supply.schedule-on($scheduler)
+            $!bytes-received.Supply.Channel.Supply
         }
         else {
             supply {
                 my $norm-enc = Rakudo::Internals.NORMALIZE_ENCODING($enc // 'utf-8');
                 my $dec = Encoding::Registry.find($norm-enc).decoder();
-                whenever $!bytes-received.Supply.schedule-on($scheduler) {
+                whenever $!bytes-received.Supply.Channel.Supply {
                     $dec.add-bytes($_);
                     emit $dec.consume-available-chars();
                     LAST emit $dec.consume-all-chars();
