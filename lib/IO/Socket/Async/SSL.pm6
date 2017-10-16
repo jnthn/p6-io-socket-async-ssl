@@ -271,10 +271,15 @@ class IO::Socket::Async::SSL {
                         :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
                         :$accepted-promise, :$alpn
                     )
-
                 }
                 whenever $accepted-promise -> $ssl-socket {
                     emit $ssl-socket;
+                    QUIT {
+                        default {
+                            # If the handshake failed, drop the connection.
+                            $sock.close;
+                        }
+                    }
                 }
             }
         }
