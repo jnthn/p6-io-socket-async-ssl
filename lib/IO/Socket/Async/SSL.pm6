@@ -1,21 +1,15 @@
 use OpenSSL;
+use OpenSSL::Base;
 use OpenSSL::Bio;
 use OpenSSL::Ctx;
 use OpenSSL::EVP;
 use OpenSSL::SSL;
 use OpenSSL::Stack;
 use OpenSSL::Err;
+use OpenSSL::X509;
 
-# XXX Contribute these back to the OpenSSL binding.
 use OpenSSL::NativeLib;
 use NativeCall;
-sub BIO_new(OpenSSL::Bio::BIO_METHOD) returns OpaquePointer is native(&gen-lib) {*}
-sub BIO_s_mem() returns OpenSSL::Bio::BIO_METHOD is native(&gen-lib) {*}
-sub SSL_do_handshake(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
-sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) {*}
-sub SSL_CTX_load_verify_locations(OpenSSL::Ctx::SSL_CTX, Str, Str) returns int32
-    is native(&gen-lib) {*}
-sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
 
 my constant SSL_TLSEXT_ERR_OK = 0;
 my constant SSL_TLSEXT_ERR_ALERT_FATAL = 2;
@@ -55,26 +49,6 @@ my constant %VERIFY_FAILURE_REASONS = %(
      32 => 'usage does not include certificate signing',
      50 => 'application verification failure',
 );
-sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer is native(&gen-lib) {*}
-sub X509_get_ext_d2i(Pointer, int32, CArray[int32], CArray[int32]) returns OpenSSL::Stack
-    is native(&gen-lib) {*}
-sub ASN1_STRING_to_UTF8(CArray[CArray[uint8]], Pointer) returns int32
-    is native(&gen-lib) {*}
-
-# ALPN
-sub SSL_CTX_set_alpn_protos(OpenSSL::Ctx::SSL_CTX, Buf, uint32) returns int32
-    is native(&gen-lib) {*}
-sub SSL_CTX_set_alpn_select_cb(OpenSSL::Ctx::SSL_CTX, &callback (
-                                   OpenSSL::SSL::SSL,        # ssl
-                                   CArray[CArray[uint8]],    # out
-                                   CArray[uint8],            # outlen
-                                   CArray[uint8],            # in
-                                   uint8,                    # inlen
-                                   Pointer --> int32),       # arg
-                               Pointer)
-    is native(&gen-lib) {*}
-sub SSL_get0_alpn_selected(OpenSSL::SSL::SSL, CArray[CArray[uint8]], uint32 is rw)
-    is native(&gen-lib) {*}
 
 my class GENERAL_NAME is repr('CStruct') {
     has int32 $.type;
@@ -112,7 +86,7 @@ class X::IO::Socket::Async::SSL::Verification is X::IO::Socket::Async::SSL {}
 class IO::Socket::Async::SSL {
     has IO::Socket::Async $!sock;
     has OpenSSL::Ctx::SSL_CTX $!ctx;
-    has OpenSSL::SSL::SSL $!ssl;
+    has OpenSSL::Base::SSL $!ssl;
     has $!read-bio;
     has $!write-bio;
     has $!connected-promise;
@@ -165,23 +139,23 @@ class IO::Socket::Async::SSL {
             my $connected-promise = Promise.new;
             $lib-lock.protect: {
                 my $ctx = self!build-client-ctx($version);
-                SSL_CTX_set_default_verify_paths($ctx);
+                OpenSSL::Ctx::SSL_CTX_set_default_verify_paths($ctx);
                 if defined($ca-file) || defined($ca-path) {
-                    SSL_CTX_load_verify_locations($ctx,
+                    OpenSSL::Ctx::SSL_CTX_load_verify_locations($ctx,
                         defined($ca-file) ?? $ca-file.Str !! Str,
                         defined($ca-path) ?? $ca-path.Str !! Str);
                 }
                 if $alpn.defined {
                     my $buf = build-protocol-list(@$alpn);
-                    SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems);
+                    OpenSSL::Ctx::SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems);
                 }
                 my $ssl = OpenSSL::SSL::SSL_new($ctx);
-                my $read-bio = BIO_new(BIO_s_mem());
-                my $write-bio = BIO_new(BIO_s_mem());
+                my $read-bio = OpenSSL::Bio::BIO_new(OpenSSL::Bio::BIO_s_mem());
+                my $write-bio = OpenSSL::Bio::BIO_new(OpenSSL::Bio::BIO_s_mem());
                 check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
                 OpenSSL::SSL::SSL_ctrl($ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, 0, $host);
                 OpenSSL::SSL::SSL_set_connect_state($ssl);
-                check($ssl, SSL_do_handshake($ssl));
+                check($ssl, OpenSSL::SSL::SSL_do_handshake($ssl));
                 CATCH {
                     OpenSSL::SSL::SSL_free($ssl) if $ssl;
                     OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
@@ -253,14 +227,14 @@ class IO::Socket::Async::SSL {
                     }
 
                     if $alpn.defined {
-                        SSL_CTX_set_alpn_select_cb(
+                        OpenSSL::Ctx::SSL_CTX_set_alpn_select_cb(
                             $ctx,
                             &alpn-selector,
                             Pointer);
                     }
                     my $ssl = OpenSSL::SSL::SSL_new($ctx);
-                    my $read-bio = BIO_new(BIO_s_mem());
-                    my $write-bio = BIO_new(BIO_s_mem());
+                    my $read-bio = OpenSSL::Bio::BIO_new(OpenSSL::Bio::BIO_s_mem());
+                    my $write-bio = OpenSSL::Bio::BIO_new(OpenSSL::Bio::BIO_s_mem());
                     check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
                     OpenSSL::SSL::SSL_set_accept_state($ssl);
                     CATCH {
@@ -353,14 +327,14 @@ class IO::Socket::Async::SSL {
                     $!connected-promise.keep(self) if $!connected-promise.status ~~ Planned;
                 }
                 else {
-                    my $cert = SSL_get_peer_certificate($!ssl);
+                    my $cert = OpenSSL::SSL::SSL_get_peer_certificate($!ssl);
                     if $cert {
                         if self!hostname-mismatch($cert) -> $message {
                             $!connected-promise.break(X::IO::Socket::Async::SSL::Verification.new(
                                 :$message
                             ));
                         }
-                        elsif (my $verify = SSL_get_verify_result($!ssl)) == 0 {
+                        elsif (my $verify = OpenSSL::SSL::SSL_get_verify_result($!ssl)) == 0 {
                             $!connected-promise.keep(self);
                         }
                         else {
@@ -417,7 +391,7 @@ class IO::Socket::Async::SSL {
         my $protocol = CArray[CArray[uint8]].new;
         $protocol[0] = CArray[uint8].new;
         my int32 $len;
-        SSL_get0_alpn_selected($!ssl, $protocol, $len);
+        OpenSSL::SSL::SSL_get0_alpn_selected($!ssl, $protocol, $len);
         if $len == 0 {
             $!alpn-result = Nil;
         } else {
@@ -442,7 +416,7 @@ class IO::Socket::Async::SSL {
     }
 
     method !hostname-mismatch($cert) {
-        my $altnames = X509_get_ext_d2i($cert, NID_subject_alt_name, CArray[int32], CArray[int32]);
+        my $altnames = OpenSSL::X509::X509_get_ext_d2i($cert, NID_subject_alt_name, CArray[int32], CArray[int32]);
         my $fold-host = $!host.fc;
         if ($altnames) {
             my @no-match;
@@ -450,7 +424,7 @@ class IO::Socket::Async::SSL {
                 my $gd = nativecast(GENERAL_NAME, $altnames.data[$i]);
                 my $out = CArray[CArray[uint8]].new;
                 $out[0] = CArray[uint8];
-                my $name-bytes = ASN1_STRING_to_UTF8($out, $gd.data);
+                my $name-bytes = OpenSSL::X509::ASN1_STRING_to_UTF8($out, $gd.data);
                 my $name = Buf.new($out[0][^$name-bytes]).decode('utf-8');
                 given $gd.type {
                     when GEN_DNS {
@@ -621,7 +595,7 @@ class IO::Socket::Async::SSL {
         once so try {
             my $ctx = self!build-client-ctx(-1);
             my $buf = build-protocol-list(['h2']);
-            SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems);
+            OpenSSL::Ctx::SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems);
             LEAVE OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
             True
         }
