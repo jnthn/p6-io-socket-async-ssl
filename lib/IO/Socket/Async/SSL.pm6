@@ -306,7 +306,7 @@ class IO::Socket::Async::SSL {
         }
         elsif $!connected-promise || $!accepted-promise {
             loop {
-                my $buf = Buf.allocate(32768);
+                my $buf = buf8.allocate(32768);
                 my $bytes-read = OpenSSL::SSL::SSL_read($!ssl, $buf, 32768);
                 if $bytes-read > 0 {
                     $!bytes-received.emit($buf.subbuf(0, $bytes-read));
