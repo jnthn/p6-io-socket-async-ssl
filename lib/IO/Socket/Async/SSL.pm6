@@ -244,8 +244,12 @@ class IO::Socket::Async::SSL {
                 $lib-lock.protect: {
                     my $ctx = self!build-server-ctx($version);
                     with $certificate-file {
-                        OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
-                            $certificate-file.Str, 1);
+                        if 1 != OpenSSL::Ctx::SSL_CTX_use_certificate_chain_file($ctx,
+                            $certificate-file.Str)
+                        {
+                            OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
+                                $certificate-file.Str, 2);
+                        }
                     }
                     with $private-key-file {
                         OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,

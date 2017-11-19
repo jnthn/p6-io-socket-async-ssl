@@ -158,4 +158,12 @@ if IO::Socket::Async::SSL.supports-alpn {
     skip "no alpn support in this ssl version", 5;
 }
 
+# Check ASN1 certificate
+my $server2 = IO::Socket::Async::SSL.listen(
+    'localhost', TEST_PORT+2,
+    private-key-file => 't/certs-and-keys/server-key.pem',
+    certificate-file => 't/certs-and-keys/server-crt.der'
+);
+isa-ok $server, Supply, 'listen method returns a Supply with ASN1 certificate';
+
 done-testing;
