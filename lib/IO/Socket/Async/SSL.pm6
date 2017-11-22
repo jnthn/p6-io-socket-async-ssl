@@ -322,7 +322,6 @@ class IO::Socket::Async::SSL {
                     OpenSSL::SSL::SSL_set_accept_state($ssl);
                     CATCH {
                         OpenSSL::SSL::SSL_free($ssl) if $ssl;
-                        OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
                     }
                     self.bless(
                         :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
