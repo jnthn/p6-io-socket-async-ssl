@@ -16,6 +16,8 @@ sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) 
 sub SSL_CTX_load_verify_locations(OpenSSL::Ctx::SSL_CTX, Str, Str) returns int32
     is native(&gen-lib) {*}
 sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
+sub SSL_CTX_set_cipher_list(OpenSSL::Ctx::SSL_CTX, Str) returns int32
+    is native(&gen-lib) {*}
 
 my constant SSL_TLSEXT_ERR_OK = 0;
 my constant SSL_TLSEXT_ERR_ALERT_FATAL = 2;
@@ -84,8 +86,12 @@ my enum GENERAL_NAME_TYPE <
     GEN_OTHERNAME GEN_EMAIL GEN_DNS GEN_X400 GEN_DIRNAME GEN_EDIPARTY
     GEN_URI GEN_IPADD GEN_RID
 >;
+my constant SSL_CTRL_OPTIONS = 32;
 my constant SSL_CTRL_SET_TLSEXT_HOSTNAME = 55;
 my constant NID_subject_alt_name = 85;
+
+my constant SSL_OP_NO_COMPRESSION = 0x20000;
+my constant SSL_OP_CIPHER_SERVER_PREFERENCE = 0x400000;
 
 # Per OpenSSL module, make a simple call to ensure libeay32.dll is loaded before
 # ssleay32.dll on Windows.
@@ -165,7 +171,8 @@ class IO::Socket::Async::SSL {
     method connect(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                    :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                    OpenSSL::ProtocolVersion :$version = -1,
-                   :$ca-file, :$ca-path, :$insecure, :$alpn) {
+                   :$ca-file, :$ca-path, :$insecure, :$alpn,
+                   Str :$ciphers) {
         start {
             my $sock = await IO::Socket::Async.connect($host, $port, :$scheduler);
             my $connected-promise = Promise.new;
@@ -176,6 +183,11 @@ class IO::Socket::Async::SSL {
                     SSL_CTX_load_verify_locations($ctx,
                         defined($ca-file) ?? $ca-file.Str !! Str,
                         defined($ca-path) ?? $ca-path.Str !! Str);
+                }
+                with $ciphers {
+                    if SSL_CTX_set_cipher_list($ctx, $ciphers) == 0 {
+                        die "No ciphers from the provided list were selected";
+                    }
                 }
                 if $alpn.defined {
                     my $buf = build-protocol-list(@$alpn);
@@ -219,7 +231,8 @@ class IO::Socket::Async::SSL {
     method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
-                  :$certificate-file, :$private-key-file, :$alpn) {
+                  :$certificate-file, :$private-key-file, :$alpn,
+                  Str :$ciphers, :$prefer-server-ciphers, :$no-compression) {
         sub alpn-selector($ssl, $out, $outlen, $in, $inlen, $arg) {
             my $buf = Buf.new;
             for (0...$inlen-1) {
@@ -260,6 +273,19 @@ class IO::Socket::Async::SSL {
                     with $private-key-file {
                         OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
                             $private-key-file.Str, 1);
+                    }
+                    with $ciphers {
+                        if SSL_CTX_set_cipher_list($ctx, $ciphers) == 0 {
+                            die "No ciphers from the provided list were selected";
+                        }
+                    }
+                    if $prefer-server-ciphers {
+                        OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                            SSL_OP_CIPHER_SERVER_PREFERENCE, Str);
+                    }
+                    if $no-compression {
+                        OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                            SSL_OP_NO_COMPRESSION, Str);
                     }
 
                     if $alpn.defined {

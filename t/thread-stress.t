@@ -1,7 +1,7 @@
 use Test;
 use IO::Socket::Async::SSL;
 
-my constant TEST_PORT = 54330;
+my constant TEST_PORT = 54332;
 
 my $ready = Promise.new;
 start react {
