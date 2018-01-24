@@ -90,6 +90,7 @@ my constant SSL_CTRL_OPTIONS = 32;
 my constant SSL_CTRL_SET_TLSEXT_HOSTNAME = 55;
 my constant NID_subject_alt_name = 85;
 
+my constant SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 0x10000;
 my constant SSL_OP_NO_COMPRESSION = 0x20000;
 my constant SSL_OP_CIPHER_SERVER_PREFERENCE = 0x400000;
 
@@ -232,7 +233,8 @@ class IO::Socket::Async::SSL {
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
                   :$certificate-file, :$private-key-file, :$alpn,
-                  Str :$ciphers, :$prefer-server-ciphers, :$no-compression) {
+                  Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
+                  :$no-session-resumption-on-renegotiation) {
         sub alpn-selector($ssl, $out, $outlen, $in, $inlen, $arg) {
             my $buf = Buf.new;
             for (0...$inlen-1) {
@@ -286,6 +288,10 @@ class IO::Socket::Async::SSL {
                     if $no-compression {
                         OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
                             SSL_OP_NO_COMPRESSION, Str);
+                    }
+                    if $no-session-resumption-on-renegotiation {
+                        OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                            SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION, Str);
                     }
 
                     if $alpn.defined {
