@@ -147,6 +147,12 @@ class IO::Socket::Async::SSL {
             done => {
                 $lib-lock.protect: -> {
                     self!handle-buffers();
+                    with $!connected-promise {
+                        if .status == Planned {
+                            .break: X::IO::Socket::Async::SSL.new:
+                                message => 'The socket was closed during negotiation';
+                        }
+                    }
                 }
                 $!bytes-received.done;
             },
