@@ -87,6 +87,7 @@ my enum GENERAL_NAME_TYPE <
     GEN_URI GEN_IPADD GEN_RID
 >;
 my constant SSL_CTRL_SET_TMP_DH = 3;
+my constant SSL_CTRL_SET_TMP_ECDH = 4;
 my constant SSL_CTRL_OPTIONS = 32;
 my constant SSL_CTRL_SET_TLSEXT_HOSTNAME = 55;
 my constant NID_subject_alt_name = 85;
@@ -152,6 +153,26 @@ sub get_dh1024() returns DH {
     }
     $dh.length = 160;
     return $dh;
+}
+
+# ECDH setup
+my constant EC_KEY = Pointer;
+my constant EC_GROUP = Pointer;
+my constant NID_X9_62_prime256v1 = 415;
+sub EC_KEY_new() returns EC_KEY is native(&gen-lib) {*}
+sub EC_KEY_set_group(EC_KEY, EC_GROUP) returns int32 is native(&gen-lib) {*}
+sub EC_GROUP_new_by_curve_name(int32) returns EC_GROUP is native(&gen-lib) {*}
+sub SSL_CTX_ctrl_ECDH(OpenSSL::Ctx::SSL_CTX, int32, int32, EC_KEY) is symbol('SSL_CTX_ctrl')
+    returns int32 is native(&gen-lib) {*}
+sub get_ecdh() {
+    my $ecdh = EC_KEY_new();
+    without $ecdh {
+        fail("Failed to allocate ECDH key");
+    }
+    if EC_KEY_set_group($ecdh, EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1)) != 1 {
+        fail("Failed to set ECDH curve group");
+    }
+    return $ecdh;
 }
 
 # Per OpenSSL module, make a simple call to ensure libeay32.dll is loaded before
@@ -342,7 +363,15 @@ class IO::Socket::Async::SSL {
                         }
                     }
                     else {
-                        warn "IO::Socket::Async::SSL: Failed to set create DH";
+                        warn "IO::Socket::Async::SSL: Failed to create DH";
+                    }
+                    with get_ecdh() {
+                        if SSL_CTX_ctrl_ECDH($ctx, SSL_CTRL_SET_TMP_ECDH, 0, $_) == 0 {
+                            warn "IO::Socket::Async::SSL: Failed to set temporary ECDH";
+                        }
+                    }
+                    else {
+                        warn "IO::Socket::Async::SSL: Failed to create ECDH";
                     }
                     with $ciphers {
                         if SSL_CTX_set_cipher_list($ctx, $ciphers) == 0 {
@@ -374,6 +403,7 @@ class IO::Socket::Async::SSL {
                     check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
                     OpenSSL::SSL::SSL_set_accept_state($ssl);
                     CATCH {
+                        .note;
                         OpenSSL::SSL::SSL_free($ssl) if $ssl;
                         OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
                     }
