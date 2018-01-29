@@ -220,7 +220,8 @@ class IO::Socket::Async::SSL {
             "IO::Socket::Async::SSL.connect or IO::Socket::Async::SSL.listen\n";
     }
 
-    submethod BUILD(:$!sock, :$!enc, :$!ctx, :$!ssl, :$!read-bio, :$!write-bio,
+    submethod BUILD(:$!sock, :$!enc, OpenSSL::Ctx::SSL_CTX :$!ctx, :$!ssl,
+                    :$!read-bio, :$!write-bio,
                     :$!connected-promise, :$!accepted-promise, :$!host, :$!alpn,
                     :$!insecure = False) {
         $!sock.Supply(:bin).tap:
@@ -341,62 +342,74 @@ class IO::Socket::Async::SSL {
         }
 
         supply {
+            # Build context, which we'll share between connections.
+            my $ctx;
+            $lib-lock.protect: {
+                $ctx = self!build-server-ctx($version);
+                with $certificate-file {
+                    if 1 != OpenSSL::Ctx::SSL_CTX_use_certificate_chain_file($ctx,
+                        $certificate-file.Str)
+                    {
+                        OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
+                            $certificate-file.Str, 2);
+                    }
+                }
+                with $private-key-file {
+                    OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
+                        $private-key-file.Str, 1);
+                }
+                with get_dh1024() {
+                    if SSL_CTX_ctrl_DH($ctx, SSL_CTRL_SET_TMP_DH, 0, $_) == 0 {
+                        warn "IO::Socket::Async::SSL: Failed to set temporary DH";
+                    }
+                }
+                else {
+                    warn "IO::Socket::Async::SSL: Failed to create DH";
+                }
+                with get_ecdh() {
+                    if SSL_CTX_ctrl_ECDH($ctx, SSL_CTRL_SET_TMP_ECDH, 0, $_) == 0 {
+                        warn "IO::Socket::Async::SSL: Failed to set temporary ECDH";
+                    }
+                }
+                else {
+                    warn "IO::Socket::Async::SSL: Failed to create ECDH";
+                }
+                with $ciphers {
+                    if SSL_CTX_set_cipher_list($ctx, $ciphers) == 0 {
+                        die "No ciphers from the provided list were selected";
+                    }
+                }
+                if $prefer-server-ciphers {
+                    OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                        SSL_OP_CIPHER_SERVER_PREFERENCE, Str);
+                }
+                if $no-compression {
+                    OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                        SSL_OP_NO_COMPRESSION, Str);
+                }
+                if $no-session-resumption-on-renegotiation {
+                    OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                        SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION, Str);
+                }
+
+                if $alpn.defined {
+                    SSL_CTX_set_alpn_select_cb(
+                        $ctx,
+                        &alpn-selector,
+                        Pointer);
+                }
+            }
+
+            CLOSE {
+                if $ctx {
+                    OpenSSL::Ctx::SSL_CTX_free($ctx);
+                    $ctx = Nil;
+                }
+            }
+
             whenever IO::Socket::Async.listen($host, $port, :$scheduler) -> $sock {
                 my $accepted-promise = Promise.new;
                 $lib-lock.protect: {
-                    my $ctx = self!build-server-ctx($version);
-                    with $certificate-file {
-                        if 1 != OpenSSL::Ctx::SSL_CTX_use_certificate_chain_file($ctx,
-                            $certificate-file.Str)
-                        {
-                            OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
-                                $certificate-file.Str, 2);
-                        }
-                    }
-                    with $private-key-file {
-                        OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
-                            $private-key-file.Str, 1);
-                    }
-                    with get_dh1024() {
-                        if SSL_CTX_ctrl_DH($ctx, SSL_CTRL_SET_TMP_DH, 0, $_) == 0 {
-                            warn "IO::Socket::Async::SSL: Failed to set temporary DH";
-                        }
-                    }
-                    else {
-                        warn "IO::Socket::Async::SSL: Failed to create DH";
-                    }
-                    with get_ecdh() {
-                        if SSL_CTX_ctrl_ECDH($ctx, SSL_CTRL_SET_TMP_ECDH, 0, $_) == 0 {
-                            warn "IO::Socket::Async::SSL: Failed to set temporary ECDH";
-                        }
-                    }
-                    else {
-                        warn "IO::Socket::Async::SSL: Failed to create ECDH";
-                    }
-                    with $ciphers {
-                        if SSL_CTX_set_cipher_list($ctx, $ciphers) == 0 {
-                            die "No ciphers from the provided list were selected";
-                        }
-                    }
-                    if $prefer-server-ciphers {
-                        OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
-                            SSL_OP_CIPHER_SERVER_PREFERENCE, Str);
-                    }
-                    if $no-compression {
-                        OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
-                            SSL_OP_NO_COMPRESSION, Str);
-                    }
-                    if $no-session-resumption-on-renegotiation {
-                        OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
-                            SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION, Str);
-                    }
-
-                    if $alpn.defined {
-                        SSL_CTX_set_alpn_select_cb(
-                            $ctx,
-                            &alpn-selector,
-                            Pointer);
-                    }
                     my $ssl = OpenSSL::SSL::SSL_new($ctx);
                     my $read-bio = BIO_new(BIO_s_mem());
                     my $write-bio = BIO_new(BIO_s_mem());
@@ -408,7 +421,7 @@ class IO::Socket::Async::SSL {
                         OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
                     }
                     self.bless(
-                        :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
+                        :$sock, :$enc, :$ssl, :$read-bio, :$write-bio,
                         :$accepted-promise, :$alpn
                     )
                 }
