@@ -78,6 +78,9 @@ configuration**, since there is no way for the client to be sure that it is
 communicating with the intended server. Therefore, it is vulnerable to
 man-in-the-middle attacks.
 
+For control over the ciphers that may be used, pass the `ciphers` argument to
+`connect`. It should be a string in [OpenSSL cipher list format](https://www.openssl.org/docs/man1.0.2/apps/ciphers.html).
+
 ## Server
 
 The `listen` method returns a `Supply` that, when tapped, will start an SSL
@@ -103,6 +106,15 @@ providing the `certificate-file` and `private-key-file`.
             exit;
         }
     }
+
+For control over the ciphers that may be used, pass the `ciphers` argument to
+`connect`. It should be a string in [OpenSSL cipher list format](https://www.openssl.org/docs/man1.0.2/apps/ciphers.html). The following boolean options are also accepted:
+
+* `prefer-server-ciphers` - indicates that the order of the ciphers list as
+  configured on the server should be preferred over that of the one presented
+  by the client
+* `no-compression` - disables compression
+* `no-session-resumption-on-renegotiation`
 
 ## Common client and server functionality
 
