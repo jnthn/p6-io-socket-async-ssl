@@ -5,8 +5,8 @@ my constant TEST_PORT = 54329;
 
 my $server = IO::Socket::Async::SSL.listen(
     'localhost', TEST_PORT,
-    private-key-file => 't/certs-and-keys/server-key.pem',
-    certificate-file => 't/certs-and-keys/server-crt.pem'
+    private-key-file => 't/certs-and-keys/server.key',
+    certificate-file => 't/certs-and-keys/server-bundle.crt'
 );
 isa-ok $server, Supply, 'listen method returns a Supply';
 dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
@@ -22,10 +22,11 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
     lives-ok { $raw-conn = await IO::Socket::Async.connect('localhost', TEST_PORT) },
         'Server listens after Supply is tapped';
     $raw-conn.close;
+    #await Promise.new;
 
     my $ssl-conn;
     lives-ok { $ssl-conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT,
-            ca-file => 't/certs-and-keys/ca-crt.pem') },
+            ca-file => 't/certs-and-keys/ca.crt') },
         'Can establish and SSL connection to the SSL server';
 
     lives-ok { $ssl-conn.write('penguin'.encode('ascii')) },
@@ -56,8 +57,8 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
 {
     my $server = IO::Socket::Async::SSL.listen(
         '127.0.0.1', TEST_PORT,
-        private-key-file => 't/certs-and-keys/server-key.pem',
-        certificate-file => 't/certs-and-keys/server-crt.pem'
+        private-key-file => 't/certs-and-keys/server.key',
+        certificate-file => 't/certs-and-keys/server-bundle.crt'
     );
     my $echo-server-tap = $server.tap: -> $conn {
         $conn.Supply(:bin).tap: -> $data {
@@ -65,7 +66,7 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
         }
     }
     throws-like { await IO::Socket::Async::SSL.connect('127.0.0.1', TEST_PORT,
-            ca-file => 't/certs-and-keys/ca-crt.pem') },
+            ca-file => 't/certs-and-keys/ca.crt') },
         X::IO::Socket::Async::SSL::Verification,
         'When we connect to 127.0.0.1, certificate for localhost will not do';
     $echo-server-tap.close;
@@ -74,8 +75,8 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
 if IO::Socket::Async::SSL.supports-alpn {
     my $server = IO::Socket::Async::SSL.listen(
         'localhost', TEST_PORT+1,
-        private-key-file => 't/certs-and-keys/server-key.pem',
-        certificate-file => 't/certs-and-keys/server-crt.pem',
+        private-key-file => 't/certs-and-keys/server.key',
+        certificate-file => 't/certs-and-keys/server-bundle.crt',
         alpn => <h2 http/1.1>
     );
 
@@ -85,7 +86,7 @@ if IO::Socket::Async::SSL.supports-alpn {
     };
 
     my $conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
-                                                    ca-file => 't/certs-and-keys/ca-crt.pem',
+                                                    ca-file => 't/certs-and-keys/ca.crt',
                                                     alpn => <h2 http/1.1>);
     is $conn.alpn-result, 'h2', 'Simple server-side ALPN works';
     $conn.?close;
@@ -97,8 +98,8 @@ if IO::Socket::Async::SSL.supports-alpn {
 if IO::Socket::Async::SSL.supports-alpn {
     my $server = IO::Socket::Async::SSL.listen(
         'localhost', TEST_PORT+1,
-        private-key-file => 't/certs-and-keys/server-key.pem',
-        certificate-file => 't/certs-and-keys/server-crt.pem',
+        private-key-file => 't/certs-and-keys/server.key',
+        certificate-file => 't/certs-and-keys/server-bundle.crt',
         alpn => sub (@options) {
             ok @options.join(', ') eq 'h2, http/1.1', 'Passed protocols are correct';
             any(@options) eq 'h2' ?? 'h2' !! Nil;
@@ -112,7 +113,7 @@ if IO::Socket::Async::SSL.supports-alpn {
     };
 
     my $conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
-                                                    ca-file => 't/certs-and-keys/ca-crt.pem',
+                                                    ca-file => 't/certs-and-keys/ca.crt',
                                                     alpn => <h2 http/1.1>);
     is $conn.alpn-result, 'h2', 'Server-side ALPN with a subroutine works';
     $conn.?close;
@@ -124,8 +125,8 @@ if IO::Socket::Async::SSL.supports-alpn {
 if IO::Socket::Async::SSL.supports-alpn {
     my $server = IO::Socket::Async::SSL.listen(
         'localhost', TEST_PORT+1,
-        private-key-file => 't/certs-and-keys/server-key.pem',
-        certificate-file => 't/certs-and-keys/server-crt.pem',
+        private-key-file => 't/certs-and-keys/server.key',
+        certificate-file => 't/certs-and-keys/server-bundle.crt',
         alpn => <h2 http/1.1>
     );
 
@@ -138,14 +139,14 @@ if IO::Socket::Async::SSL.supports-alpn {
 
     my $p1 = start {
         my $conn1 = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
-                                                         ca-file => 't/certs-and-keys/ca-crt.pem',
+                                                         ca-file => 't/certs-and-keys/ca.crt',
                                                          alpn => <http/1.1>);
         ok $conn1.alpn-result eq 'http/1.1', 'Negotiation is correct';
         $conn1.?close;
     }
     my $p2 = start {
         my $conn2 = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
-                                                         ca-file => 't/certs-and-keys/ca-crt.pem',
+                                                         ca-file => 't/certs-and-keys/ca.crt',
                                                          alpn => <h2 http/1.1>);
         ok $conn2.alpn-result eq 'h2', 'Negotiation is correct';
         $conn2.?close;
@@ -158,12 +159,20 @@ if IO::Socket::Async::SSL.supports-alpn {
     skip "no alpn support in this ssl version", 5;
 }
 
-# Check ASN1 certificate
-my $server2 = IO::Socket::Async::SSL.listen(
-    'localhost', TEST_PORT+2,
-    private-key-file => 't/certs-and-keys/server-key.pem',
-    certificate-file => 't/certs-and-keys/server-crt.der'
+# Check PKCS12 bundle
+my $server3 = IO::Socket::Async::SSL.listen(
+    'localhost', TEST_PORT+3,
+    certificate-file => 't/certs-and-keys/server-bundle.p12'
 );
-isa-ok $server, Supply, 'listen method returns a Supply with ASN1 certificate';
+isa-ok $server3, Supply, 'listen method returns a Supply with PKCS12 bundle';
+my $echo-server3-tap = $server3.tap: -> $conn {
+    $conn.Supply(:bin).tap: -> $data {
+        $conn.write($data);
+    }
+}
+my $ssl-conn;
+lives-ok { $ssl-conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT + 3,
+     ca-file => 't/certs-and-keys/ca.crt') },
+    'Can establish and SSL connection to the SSL server';
 
 done-testing;

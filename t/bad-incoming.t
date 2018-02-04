@@ -5,8 +5,8 @@ my constant TEST_PORT = 54333;
 
 my $server = IO::Socket::Async::SSL.listen(
     'localhost', TEST_PORT,
-    private-key-file => 't/certs-and-keys/server-key.pem',
-    certificate-file => 't/certs-and-keys/server-crt.pem'
+    private-key-file => 't/certs-and-keys/server.key',
+    certificate-file => 't/certs-and-keys/server-bundle.crt'
 );
 
 my ($conns, $quits) = 0, 0;

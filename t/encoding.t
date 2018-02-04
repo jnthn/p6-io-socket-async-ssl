@@ -5,9 +5,9 @@ my constant TEST_PORT = 54331;
 
 my $ready = Promise.new;
 start react {
-    my %conf = 
-        private-key-file => 't/certs-and-keys/server-key.pem',
-        certificate-file => 't/certs-and-keys/server-crt.pem';
+    my %conf =
+        private-key-file => 't/certs-and-keys/server.key',
+        certificate-file => 't/certs-and-keys/server-bundle.crt';
     whenever IO::Socket::Async::SSL.listen('localhost', TEST_PORT, |%conf) -> $conn {
         whenever $conn.Supply(:enc('utf-8')) -> $str {
             $conn.print($str.uc);
@@ -21,7 +21,7 @@ my $enc = "пиво\n".encode('utf-8');
 my $conn = await IO::Socket::Async::SSL.connect(
     'localhost', TEST_PORT,
     enc => 'utf-8',
-    ca-file => 't/certs-and-keys/ca-crt.pem'
+    ca-file => 't/certs-and-keys/ca.crt'
 );
 await $conn.write($enc.subbuf(0, 3));
 await $conn.write($enc.subbuf(3));

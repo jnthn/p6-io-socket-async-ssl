@@ -5,8 +5,8 @@ my constant TEST_PORT = 54334;
 
 my $server = IO::Socket::Async::SSL.listen(
     'localhost', TEST_PORT,
-    private-key-file => 't/certs-and-keys/server-key.pem',
-    certificate-file => 't/certs-and-keys/server-crt.pem',
+    private-key-file => 't/certs-and-keys/server.key',
+    certificate-file => 't/certs-and-keys/server-bundle.crt',
     ciphers => 'DHE-RSA-AES256-GCM-SHA384'
 );
 my $echo-server-tap = $server.tap: -> $conn {
@@ -19,7 +19,7 @@ END $echo-server-tap.close;
 lives-ok
     {
         my $s = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT,
-            ca-file => 't/certs-and-keys/ca-crt.pem',
+            ca-file => 't/certs-and-keys/ca.crt',
             ciphers => 'DHE-RSA-AES256-GCM-SHA384');
         $s.close;
     },
