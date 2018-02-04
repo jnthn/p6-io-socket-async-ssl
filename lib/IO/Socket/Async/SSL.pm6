@@ -17,12 +17,12 @@ sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) 
 sub SSL_CTX_load_verify_locations(OpenSSL::Ctx::SSL_CTX, Str, Str) returns int32
     is native(&gen-lib) {*}
 sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
+sub SSL_CTX_set_cipher_list(OpenSSL::Ctx::SSL_CTX, Str) returns int32
+    is native(&gen-lib) {*}
 
 sub d2i_PKCS12(Pointer, CArray[CArray[uint8]], long) returns Pointer is native(&gen-lib) {*}
 sub PKCS12_parse(Pointer, Str, CArray[Pointer], CArray[Pointer], CArray[Pointer])
     returns int32 is native(&gen-lib) {*}
-sub OPENSSL_add_all_algorithms_noconf() is native(&crypto-lib) {*}
-sub OpenSSL_add_all_algorithms() is native(&crypto-lib) {*}
 
 my constant SSL_TLSEXT_ERR_OK = 0;
 my constant SSL_TLSEXT_ERR_ALERT_FATAL = 2;
@@ -91,8 +91,94 @@ my enum GENERAL_NAME_TYPE <
     GEN_OTHERNAME GEN_EMAIL GEN_DNS GEN_X400 GEN_DIRNAME GEN_EDIPARTY
     GEN_URI GEN_IPADD GEN_RID
 >;
+my constant SSL_CTRL_SET_TMP_DH = 3;
+my constant SSL_CTRL_SET_TMP_ECDH = 4;
+my constant SSL_CTRL_OPTIONS = 32;
 my constant SSL_CTRL_SET_TLSEXT_HOSTNAME = 55;
 my constant NID_subject_alt_name = 85;
+
+my constant SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 0x10000;
+my constant SSL_OP_NO_COMPRESSION = 0x20000;
+my constant SSL_OP_CIPHER_SERVER_PREFERENCE = 0x400000;
+
+# DH setup-related bits, so we can use ciphers that need this
+my constant BIGNUM = Pointer;
+my class DH is repr('CStruct') {
+    has int32 $.pad;
+    has int32 $.version;
+    has BIGNUM $.p;
+    has BIGNUM $.g;
+    has int32 $.length is rw;
+    # There are more fields in this struct, but we don't care about them in this
+    # module.
+
+    method set-p(\p) { $!p := p }
+    method set-g(\g) { $!g := g }
+};
+sub DH_new() returns DH is native(&gen-lib) {*}
+sub DH_free(DH) is native(&gen-lib) {*}
+sub BN_bin2bn(Blob, int32, BIGNUM) returns BIGNUM is native(&gen-lib) {*}
+sub SSL_CTX_ctrl_DH(OpenSSL::Ctx::SSL_CTX, int32, int32, DH) is symbol('SSL_CTX_ctrl')
+    returns int32 is native(&gen-lib) {*}
+sub get_dh1024() returns DH {
+    # Based on output from `openssl dhparam -dsaparam -C 512`
+    my constant dh1024_p = Blob.new:
+        0xC7,0xA6,0x29,0x3B,0x29,0x3F,0x9B,0x94,0x96,0x23,0x9B,0x79,
+        0xDF,0xC9,0x9C,0x2D,0xF0,0x7C,0x04,0xC0,0x81,0xC8,0x08,0xF4,
+        0x7B,0xD4,0x76,0xAB,0xFF,0x07,0x6C,0x9A,0xE9,0xF1,0x08,0x7F,
+        0xBB,0x32,0xF0,0x7E,0xC7,0xD7,0xA2,0xA9,0x9A,0x1E,0xD1,0x84,
+        0x9E,0xEB,0xEA,0x88,0x72,0x1D,0xF5,0x61,0x83,0xA9,0x7B,0xE4,
+        0x1F,0xA0,0xA6,0x01,0x82,0xD1,0x6C,0x6F,0xB2,0x15,0x20,0x50,
+        0x70,0xDB,0xEE,0x31,0x5E,0x69,0xF7,0x2F,0x0D,0xE5,0x55,0x8C,
+        0xF7,0xE3,0x5F,0x71,0x58,0x3F,0xEA,0x9C,0xE0,0xE9,0x26,0x2E,
+        0x21,0xF1,0xB9,0x3A,0xBA,0x5A,0x03,0xBB,0x1C,0x35,0xF0,0xA0,
+        0xF2,0x06,0x1A,0xB3,0x30,0xFB,0x39,0x22,0xDA,0x15,0x38,0xFC,
+        0x21,0x20,0x91,0xDD,0x5B,0xC1,0x16,0x9B;
+    my constant dh1024_g = Blob.new:
+        0x19,0x4F,0x37,0x25,0x31,0xD6,0x79,0xE9,0x00,0xA9,0x70,0x8A,
+        0x0E,0x60,0xB5,0x30,0x2B,0x7F,0x53,0x9A,0x06,0xB0,0x9D,0xD3,
+        0x58,0x83,0xFF,0xAE,0x3F,0xAC,0xD3,0xFC,0x56,0xC2,0x64,0xA7,
+        0x96,0x7C,0xC2,0x89,0x8C,0x97,0x96,0xB5,0xC2,0x02,0x3A,0x4A,
+        0x94,0x6A,0xD3,0x99,0x2D,0x72,0x07,0xD4,0x53,0x3D,0x98,0x38,
+        0x74,0x96,0x32,0x4A,0xC9,0x85,0x86,0x0D,0x8B,0xD3,0xE8,0x79,
+        0xE1,0x00,0xEF,0x01,0x27,0xEA,0xFA,0xCF,0x9D,0x2C,0x7A,0xC9,
+        0x18,0x14,0x1C,0x34,0xAD,0x53,0x37,0x01,0x09,0xB8,0x7F,0x5E,
+        0x92,0x4D,0xCB,0xDA,0x29,0x0D,0xA4,0x5E,0x06,0xE4,0x1B,0xC8,
+        0x3F,0x7F,0x60,0x6B,0x82,0x8F,0x48,0x59,0xED,0x3D,0x63,0xE8,
+        0x9C,0xF0,0xB6,0x42,0xBF,0xFD,0xD9,0x32;
+    my DH $dh = DH_new();
+    without $dh {
+        fail("Could not allocate DH");
+    }
+    $dh.set-p: BN_bin2bn(dh1024_p, dh1024_p.elems, BIGNUM);
+    $dh.set-g: BN_bin2bn(dh1024_g, dh1024_g.elems, BIGNUM);
+    if !$dh.p || !$dh.g {
+        DH_free($dh);
+        fail("Failed to set up DH");
+    }
+    $dh.length = 160;
+    return $dh;
+}
+
+# ECDH setup
+my constant EC_KEY = Pointer;
+my constant EC_GROUP = Pointer;
+my constant NID_X9_62_prime256v1 = 415;
+sub EC_KEY_new() returns EC_KEY is native(&gen-lib) {*}
+sub EC_KEY_set_group(EC_KEY, EC_GROUP) returns int32 is native(&gen-lib) {*}
+sub EC_GROUP_new_by_curve_name(int32) returns EC_GROUP is native(&gen-lib) {*}
+sub SSL_CTX_ctrl_ECDH(OpenSSL::Ctx::SSL_CTX, int32, int32, EC_KEY) is symbol('SSL_CTX_ctrl')
+    returns int32 is native(&gen-lib) {*}
+sub get_ecdh() {
+    my $ecdh = EC_KEY_new();
+    without $ecdh {
+        fail("Failed to allocate ECDH key");
+    }
+    if EC_KEY_set_group($ecdh, EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1)) != 1 {
+        fail("Failed to set ECDH curve group");
+    }
+    return $ecdh;
+}
 
 # Per OpenSSL module, make a simple call to ensure libeay32.dll is loaded before
 # ssleay32.dll on Windows.
@@ -139,7 +225,8 @@ class IO::Socket::Async::SSL {
             "IO::Socket::Async::SSL.connect or IO::Socket::Async::SSL.listen\n";
     }
 
-    submethod BUILD(:$!sock, :$!enc, :$!ctx, :$!ssl, :$!read-bio, :$!write-bio,
+    submethod BUILD(:$!sock, :$!enc, OpenSSL::Ctx::SSL_CTX :$!ctx, :$!ssl,
+                    :$!read-bio, :$!write-bio,
                     :$!connected-promise, :$!accepted-promise, :$!host, :$!alpn,
                     :$!insecure = False) {
         $!sock.Supply(:bin).tap:
@@ -154,6 +241,12 @@ class IO::Socket::Async::SSL {
             done => {
                 $lib-lock.protect: -> {
                     self!handle-buffers();
+                    with $!connected-promise {
+                        if .status == Planned {
+                            .break: X::IO::Socket::Async::SSL.new:
+                                message => 'The socket was closed during negotiation';
+                        }
+                    }
                 }
                 $!bytes-received.done;
             },
@@ -166,7 +259,8 @@ class IO::Socket::Async::SSL {
     method connect(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                    :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                    OpenSSL::ProtocolVersion :$version = -1,
-                   :$ca-file, :$ca-path, :$insecure, :$alpn) {
+                   :$ca-file, :$ca-path, :$insecure, :$alpn,
+                   Str :$ciphers) {
         start {
             my $sock = await IO::Socket::Async.connect($host, $port, :$scheduler);
             my $connected-promise = Promise.new;
@@ -177,6 +271,11 @@ class IO::Socket::Async::SSL {
                     SSL_CTX_load_verify_locations($ctx,
                         defined($ca-file) ?? $ca-file.Str !! Str,
                         defined($ca-path) ?? $ca-path.Str !! Str);
+                }
+                with $ciphers {
+                    if SSL_CTX_set_cipher_list($ctx, $ciphers) == 0 {
+                        die "No ciphers from the provided list were selected";
+                    }
                 }
                 if $alpn.defined {
                     my $buf = build-protocol-list(@$alpn);
@@ -220,7 +319,9 @@ class IO::Socket::Async::SSL {
     method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
-                  :$certificate-file, :$private-key-file, :$alpn) {
+                  :$certificate-file, :$private-key-file, :$alpn,
+                  Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
+                  :$no-session-resumption-on-renegotiation) {
         sub alpn-selector($ssl, $out, $outlen, $in, $inlen, $arg) {
             my $buf = Buf.new;
             for (0...$inlen-1) {
@@ -245,86 +346,129 @@ class IO::Socket::Async::SSL {
             SSL_TLSEXT_ERR_OK;
         }
 
-        my $ctx;
-
-        $lib-lock.protect: {
-            $ctx = self!build-server-ctx($version);
-            my ($have-cert, $have-pkey);
-            with $certificate-file {
-                if 1 == OpenSSL::Ctx::SSL_CTX_use_certificate_chain_file($ctx,
-                    $certificate-file.Str)
-                {
-                    $have-cert = 'PEM';
-                } elsif 1 == OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
-                        $certificate-file.Str, 2)
-                {
-                    $have-cert = 'DER';
-                } else {
-                    # Failed to import either PEM chain or ASN1 certificate file
-                    # Proceeding with PKCS12
-                    my $p12buf = slurp $certificate-file, :bin;
-                    my Pointer $pkcs12 = d2i_PKCS12(Pointer,
-                        CArray[CArray[uint8]].new([CArray[uint8].new($p12buf)]),
-                        $p12buf.elems);
-                    die "Failed to import $certificate-file as PEM/ASN1/PKCS12"
-                        unless so $pkcs12;
-                    my $pkey = CArray[Pointer].new([Pointer.new]);
-                    my $cert = CArray[Pointer].new([Pointer.new]);
-                    my $chain = CArray[Pointer].new([Pointer.new]);
-                    # TODO: Passphrase handling
-                    die "Failed to parse $certificate-file as PKCS12"
-                        unless 1 == PKCS12_parse($pkcs12, '', $pkey, $cert, $chain);
-                    if so $pkey[0] {
-                        $have-pkey = 'PKCS12';
-                        OpenSSL::Ctx::SSL_CTX_use_PrivateKey($ctx, $pkey[0]);
-                        OpenSSL::EVP::EVP_PKEY_free($pkey[0]);
-                    }
-                    if so $cert[0] {
-                        $have-cert = 'PKCS12';
-                        OpenSSL::Ctx::SSL_CTX_use_certificate($ctx, $cert[0]);
-                        OpenSSL::X509::X509_free($cert[0]);
-                    }
-                    if so $chain[0] {
-                        for (0..OpenSSL::Stack::sk_num(nativecast(OpenSSL::Stack, $chain[0]))) {
-                            my $x509 = OpenSSL::Stack::sk_value(nativecast(OpenSSL::Stack, $chain[0]), $_);
-                            # #define SSL_CTX_add_extra_chain_cert(ctx,x509) \
-                            #       SSL_CTX_ctrl(ctx,SSL_CTRL_EXTRA_CHAIN_CERT,0,(char *)x509)
-                            if so $x509 {
-                                OpenSSL::Ctx::SSL_CTX_ctrl($ctx, 14, 0, $x509);
-                            }
+        supply {
+            # Build context, which we'll share between connections.
+            my $ctx;
+            $lib-lock.protect: {
+                $ctx = self!build-server-ctx($version);
+                my ($have-cert, $have-pkey);
+                with $certificate-file {
+                    if 1 == OpenSSL::Ctx::SSL_CTX_use_certificate_chain_file($ctx,
+                        $certificate-file.Str)
+                    {
+                        $have-cert = 'PEM';
+                    } elsif 1 == OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
+                            $certificate-file.Str, 2)
+                    {
+                        $have-cert = 'DER';
+                    } else {
+                        # Failed to import either PEM chain or ASN1 certificate file
+                        # Proceeding with PKCS12
+                        my $p12buf = slurp $certificate-file, :bin;
+                        my Pointer $pkcs12 = d2i_PKCS12(Pointer,
+                            CArray[CArray[uint8]].new([CArray[uint8].new($p12buf)]),
+                            $p12buf.elems);
+                        die "Failed to import $certificate-file as PEM/ASN1/PKCS12"
+                            unless so $pkcs12;
+                        my $pkey = CArray[Pointer].new([Pointer.new]);
+                        my $cert = CArray[Pointer].new([Pointer.new]);
+                        my $chain = CArray[Pointer].new([Pointer.new]);
+                        # TODO: Passphrase handling
+                        die "Failed to parse $certificate-file as PKCS12"
+                            unless 1 == PKCS12_parse($pkcs12, '', $pkey, $cert, $chain);
+                        if so $pkey[0] {
+                            $have-pkey = 'PKCS12';
+                            OpenSSL::Ctx::SSL_CTX_use_PrivateKey($ctx, $pkey[0]);
+                            OpenSSL::EVP::EVP_PKEY_free($pkey[0]);
                         }
-                        OpenSSL::Stack::sk_free(nativecast(OpenSSL::Stack, $chain[0]));
+                        if so $cert[0] {
+                            $have-cert = 'PKCS12';
+                            OpenSSL::Ctx::SSL_CTX_use_certificate($ctx, $cert[0]);
+                            OpenSSL::X509::X509_free($cert[0]);
+                        }
+                        if so $chain[0] {
+                            for (0..OpenSSL::Stack::sk_num(nativecast(OpenSSL::Stack, $chain[0]))) {
+                                my $x509 = OpenSSL::Stack::sk_value(nativecast(OpenSSL::Stack, $chain[0]), $_);
+                                # #define SSL_CTX_add_extra_chain_cert(ctx,x509) \
+                                #       SSL_CTX_ctrl(ctx,SSL_CTRL_EXTRA_CHAIN_CERT,0,(char *)x509)
+                                if so $x509 {
+                                    OpenSSL::Ctx::SSL_CTX_ctrl($ctx, 14, 0, $x509);
+                                }
+                            }
+                            OpenSSL::Stack::sk_free(nativecast(OpenSSL::Stack, $chain[0]));
+                        }
+                    }
+                    die "No server certificate in $certificate-file" without $have-cert;
+                }
+                with $private-key-file {
+                    die "Private key already added as $have-pkey" with $have-pkey;
+                    OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
+                        $private-key-file.Str, 1);
+                }
+                with get_dh1024() {
+                    if SSL_CTX_ctrl_DH($ctx, SSL_CTRL_SET_TMP_DH, 0, $_) == 0 {
+                        warn "IO::Socket::Async::SSL: Failed to set temporary DH";
                     }
                 }
-                die "No server certificate in $certificate-file" without $have-cert;
-            }
-            with $private-key-file {
-                die "Private key already added as $have-pkey" with $have-pkey;
-                OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
-                    $private-key-file.Str, 1);
-            }
-        }
+                else {
+                    warn "IO::Socket::Async::SSL: Failed to create DH";
+                }
+                with get_ecdh() {
+                    if SSL_CTX_ctrl_ECDH($ctx, SSL_CTRL_SET_TMP_ECDH, 0, $_) == 0 {
+                        warn "IO::Socket::Async::SSL: Failed to set temporary ECDH";
+                    }
+                }
+                else {
+                    warn "IO::Socket::Async::SSL: Failed to create ECDH";
+                }
+                with $ciphers {
+                    if SSL_CTX_set_cipher_list($ctx, $ciphers) == 0 {
+                        die "No ciphers from the provided list were selected";
+                    }
+                }
+                if $prefer-server-ciphers {
+                    OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                        SSL_OP_CIPHER_SERVER_PREFERENCE, Str);
+                }
+                if $no-compression {
+                    OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                        SSL_OP_NO_COMPRESSION, Str);
+                }
+                if $no-session-resumption-on-renegotiation {
+                    OpenSSL::Ctx::SSL_CTX_ctrl($ctx, SSL_CTRL_OPTIONS,
+                        SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION, Str);
+                }
 
-        supply {
+                if $alpn.defined {
+                    SSL_CTX_set_alpn_select_cb(
+                        $ctx,
+                        &alpn-selector,
+                        Pointer);
+                }
+            }
+
+            CLOSE {
+                if $ctx {
+                    OpenSSL::Ctx::SSL_CTX_free($ctx);
+                    $ctx = Nil;
+                }
+            }
+
             whenever IO::Socket::Async.listen($host, $port, :$scheduler) -> $sock {
                 my $accepted-promise = Promise.new;
                 $lib-lock.protect: {
-                    if $alpn.defined {
-                        SSL_CTX_set_alpn_select_cb(
-                            $ctx,
-                            &alpn-selector,
-                            Pointer);
-                    }
                     my $ssl = OpenSSL::SSL::SSL_new($ctx);
                     my $read-bio = BIO_new(BIO_s_mem());
                     my $write-bio = BIO_new(BIO_s_mem());
                     check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
                     OpenSSL::SSL::SSL_set_accept_state($ssl);
                     CATCH {
+                        .note;
                         OpenSSL::SSL::SSL_free($ssl) if $ssl;
+                        OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
                     }
                     self.bless(
-                        :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
+                        :$sock, :$enc, :$ssl, :$read-bio, :$write-bio,
                         :$accepted-promise, :$alpn
                     )
                 }
