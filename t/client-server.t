@@ -22,7 +22,6 @@ dies-ok { await IO::Socket::Async.connect('localhost', TEST_PORT) },
     lives-ok { $raw-conn = await IO::Socket::Async.connect('localhost', TEST_PORT) },
         'Server listens after Supply is tapped';
     $raw-conn.close;
-    #await Promise.new;
 
     my $ssl-conn;
     lives-ok { $ssl-conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT,
@@ -141,19 +140,23 @@ if IO::Socket::Async::SSL.supports-alpn {
         my $conn1 = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
                                                          ca-file => 't/certs-and-keys/ca.crt',
                                                          alpn => <http/1.1>);
-        ok $conn1.alpn-result eq 'http/1.1', 'Negotiation is correct';
+        my $result = $conn1.alpn-result;
         $conn1.?close;
+        $result
     }
     my $p2 = start {
         my $conn2 = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT+1,
                                                          ca-file => 't/certs-and-keys/ca.crt',
                                                          alpn => <h2 http/1.1>);
-        ok $conn2.alpn-result eq 'h2', 'Negotiation is correct';
+        my $result = $conn2.alpn-result;
         $conn2.?close;
+        $result
     }
     await Promise.anyof(Promise.in(5), Promise.allof($p1, $p2));
     ok $p1.status ~~ Kept, 'Multiple clients with ALPN work';
     ok $p2.status ~~ Kept, 'Multiple clients with ALPN work';
+    is $p1.result, 'http/1.1', 'Negotiation is correct (1)';
+    is $p2.result, 'h2', 'Negotiation is correct (2)';
     $echo-server-tap.close;
 } else {
     skip "no alpn support in this ssl version", 5;
