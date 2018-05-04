@@ -132,6 +132,8 @@ in [IO::Socket::Async](https://docs.perl6.org/type/IO$COLON$COLONSocket$COLON$CO
 
 ## Bugs, feature requests, and contributions
 
-Please use GitHub Issues to file bug reports and feature requests. If you wish
-to contribute to this module, please file a GitHub Pull Request, or email a
-Git patch (produced using `format-patch`) to [jnthn@jnthn.net](mailto:jnthn@jnthn.net).
+Please use [GitHub Issues](https://github.com/jnthn/p6-io-socket-async-ssl/issues)
+to file bug reports and feature requests. If you wish to contribute to this
+module, please file a GitHub Pull Request, or email a Git patch (produced using
+`format-patch`) to [jnthn@jnthn.net](mailto:jnthn@jnthn.net). Please also use
+this email address to report security vulnerabilities.
