@@ -130,6 +130,68 @@ arguments:
 The `Supply`, `print`, `write`, and `close` methods have the same semantics as
 in [IO::Socket::Async](https://docs.perl6.org/type/IO$COLON$COLONSocket$COLON$COLONAsync).
 
+## Upgrading connections
+
+Some protocols use [opportunistic TLS](https://en.wikipedia.org/wiki/Opportunistic_TLS),
+where the decision to use transport layer security is first negotiated using
+a non-encrypted protocol - provided negotiation is successful - a TLS handshake
+is then performed. This functionality is provided by the `upgrade-server` and
+`upgrade-client` methods. Note that the socket to upgrade must be an instance
+of `IO::Socket::Async`. Further, it is important to **stop reading from the
+socket after initiating the upgrade**.
+
+Here is an example of using `upgrade-server`. Note the use of `last` in order
+to terminate the `whenever` that reads from the plain connection.
+
+    react whenever IO::Socket::Async.listen('localhost', TEST_PORT) -> $plain-conn {
+        whenever $plain-conn.Supply -> $start {
+            if $start eq "Psst, let's talk securely!\n" {
+                my $enc-conn-handshake = IO::Socket::Async::SSL.upgrade-server(
+                    $plain-conn,
+                    private-key-file => 't/certs-and-keys/server.key',
+                    certificate-file => 't/certs-and-keys/server-bundle.crt'
+                );
+                whenever $enc-conn-handshake -> $enc-conn {
+                    uc-service($enc-conn);
+                }
+                $plain-conn.print("OK, let's talk securely!\n");
+                last;
+            }
+            else {
+                $plain-conn.print("OK, let's talk insecurely\n");
+                uc-service($plain-conn);
+            }
+        }
+
+        sub uc-service($conn) {
+            whenever $conn -> $crypt-text {
+                whenever $conn.print($crypt-text.uc) {
+                    $conn.close;
+                }
+            }
+        }
+    }
+
+Here's an example using `upgrade-client`; again, take note of the `last`.
+
+    my $plain-conn = await IO::Socket::Async.connect('localhost', TEST_PORT);
+    await $plain-conn.print("Psst, let's talk securely!\n");
+    react whenever $plain-conn -> $msg {
+        my $enc-conn-handshake = IO::Socket::Async::SSL.upgrade-client(
+            $plain-conn,
+            host => 'localhost',
+            ca-file => 't/certs-and-keys/ca.crt');
+        whenever $enc-conn-handshake -> $enc-conn {
+            await $enc-conn.print("hello!\n");
+            whenever $enc-conn.head -> $got {
+                print $got; # HELLO!
+                done;
+            }
+        }
+
+        last;
+    }
+
 ## Bugs, feature requests, and contributions
 
 Please use [GitHub Issues](https://github.com/jnthn/p6-io-socket-async-ssl/issues)
