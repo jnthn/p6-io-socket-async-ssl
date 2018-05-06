@@ -7,7 +7,7 @@ my $ready = Promise.new;;
 start {
     react {
         whenever IO::Socket::Async.listen('localhost', TEST_PORT) -> $plain-conn {
-            whenever $plain-conn.Supply.head -> $start {
+            whenever $plain-conn.Supply -> $start {
                 if $start eq "Psst, let's talk securely!\n" {
                     my $enc-conn-handshake = IO::Socket::Async::SSL.upgrade-server(
                         $plain-conn,
@@ -46,7 +46,7 @@ await $ready;
 
 my $plain-conn = await IO::Socket::Async.connect('localhost', TEST_PORT);
 await $plain-conn.print("Psst, let's talk securely!\n");
-react whenever $plain-conn.head -> $msg {
+react whenever $plain-conn -> $msg {
     is $msg, "OK, let's talk securely!\n", 'Got expected upgrade response';
 
     my $enc-conn-handshake = IO::Socket::Async::SSL.upgrade-client(
@@ -61,6 +61,8 @@ react whenever $plain-conn.head -> $msg {
             done;
         }
     }
+
+    last;
 }
 
 done-testing;
