@@ -261,8 +261,28 @@ class IO::Socket::Async::SSL {
                    OpenSSL::ProtocolVersion :$version = -1,
                    :$ca-file, :$ca-path, :$insecure, :$alpn,
                    Str :$ciphers) {
+        self!client-setup:
+            { IO::Socket::Async.connect($host, $port, :$scheduler) },
+            :$enc, :$version, :$ca-file, :$ca-path, :$insecure,
+            :$alpn, :$ciphers, :$host;
+     }
+
+    method upgrade-client(IO::Socket::Async::SSL:U: IO::Socket::Async:D $conn,
+                          :$enc = 'utf8', OpenSSL::ProtocolVersion :$version = -1,
+                          :$ca-file, :$ca-path, :$insecure, :$alpn,
+                          Str :$ciphers, Str :$host) {
+        self!client-setup:
+            { Promise.kept($conn) },
+            :$enc, :$version, :$ca-file, :$ca-path, :$insecure,
+            :$alpn, :$ciphers, :$host;
+     }
+
+     method !client-setup(&connection-source,
+                          :$enc = 'utf8', OpenSSL::ProtocolVersion :$version,
+                          :$ca-file, :$ca-path, :$insecure, :$alpn, :$ciphers,
+                          Str :$host) {
         start {
-            my $sock = await IO::Socket::Async.connect($host, $port, :$scheduler);
+            my $sock = await connection-source();
             my $connected-promise = Promise.new;
             $lib-lock.protect: {
                 my $ctx = self!build-client-ctx($version);
@@ -285,7 +305,9 @@ class IO::Socket::Async::SSL {
                 my $read-bio = BIO_new(BIO_s_mem());
                 my $write-bio = BIO_new(BIO_s_mem());
                 check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
-                OpenSSL::SSL::SSL_ctrl($ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, 0, $host);
+                with $host {
+                    OpenSSL::SSL::SSL_ctrl($ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, 0, $host);
+                }
                 OpenSSL::SSL::SSL_set_connect_state($ssl);
                 check($ssl, SSL_do_handshake($ssl));
                 CATCH {
@@ -319,6 +341,30 @@ class IO::Socket::Async::SSL {
     method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
+                  :$certificate-file, :$private-key-file, :$alpn,
+                  Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
+                  :$no-session-resumption-on-renegotiation) {
+        self!server-setup:
+            IO::Socket::Async.listen($host, $port, :$scheduler),
+            :$enc, :$version, :$certificate-file, :$private-key-file,
+            :$alpn, :$ciphers, :$prefer-server-ciphers, :$no-compression,
+            :$no-session-resumption-on-renegotiation;
+    }
+
+    method upgrade-server(IO::Socket::Async::SSL:U: IO::Socket::Async:D $socket,
+                  :$enc = 'utf8', OpenSSL::ProtocolVersion :$version = -1,
+                  :$certificate-file, :$private-key-file, :$alpn,
+                  Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
+                  :$no-session-resumption-on-renegotiation) {
+        self!server-setup:
+            $socket,
+            :$enc, :$version, :$certificate-file, :$private-key-file,
+            :$alpn, :$ciphers, :$prefer-server-ciphers, :$no-compression,
+            :$no-session-resumption-on-renegotiation;
+    }
+
+    method !server-setup($connection-source,
+                  :$enc, OpenSSL::ProtocolVersion :$version,
                   :$certificate-file, :$private-key-file, :$alpn,
                   Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
                   :$no-session-resumption-on-renegotiation) {
@@ -454,7 +500,16 @@ class IO::Socket::Async::SSL {
                 }
             }
 
-            whenever IO::Socket::Async.listen($host, $port, :$scheduler) -> $sock {
+            if $connection-source ~~ Supply {
+                whenever $connection-source -> $sock {
+                    handle-connection($sock);
+                }
+            }
+            else {
+                handle-connection($connection-source);
+            }
+
+            sub handle-connection($sock) {
                 my $accepted-promise = Promise.new;
                 $lib-lock.protect: {
                     my $ssl = OpenSSL::SSL::SSL_new($ctx);
