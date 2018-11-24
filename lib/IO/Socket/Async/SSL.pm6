@@ -12,13 +12,13 @@ use OpenSSL::NativeLib;
 use NativeCall;
 sub BIO_new(OpenSSL::Bio::BIO_METHOD) returns OpaquePointer is native(&gen-lib) {*}
 sub BIO_s_mem() returns OpenSSL::Bio::BIO_METHOD is native(&gen-lib) {*}
-sub SSL_do_handshake(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
-sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&gen-lib) {*}
+sub SSL_do_handshake(OpenSSL::SSL::SSL) returns int32 is native(&ssl-lib) {*}
+sub SSL_CTX_set_default_verify_paths(OpenSSL::Ctx::SSL_CTX) is native(&ssl-lib) {*}
 sub SSL_CTX_load_verify_locations(OpenSSL::Ctx::SSL_CTX, Str, Str) returns int32
-    is native(&gen-lib) {*}
-sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&gen-lib) {*}
+    is native(&ssl-lib) {*}
+sub SSL_get_verify_result(OpenSSL::SSL::SSL) returns int32 is native(&ssl-lib) {*}
 sub SSL_CTX_set_cipher_list(OpenSSL::Ctx::SSL_CTX, Str) returns int32
-    is native(&gen-lib) {*}
+    is native(&ssl-lib) {*}
 
 sub d2i_PKCS12(Pointer, CArray[CArray[uint8]], long) returns Pointer is native(&gen-lib) {*}
 sub PKCS12_parse(Pointer, Str, CArray[Pointer], CArray[Pointer], CArray[Pointer])
@@ -62,7 +62,7 @@ my constant %VERIFY_FAILURE_REASONS = %(
      32 => 'usage does not include certificate signing',
      50 => 'application verification failure',
 );
-sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer is native(&gen-lib) {*}
+sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer is native(&ssl-lib) {*}
 sub X509_get_ext_d2i(Pointer, int32, CArray[int32], CArray[int32]) returns OpenSSL::Stack
     is native(&gen-lib) {*}
 sub ASN1_STRING_to_UTF8(CArray[CArray[uint8]], Pointer) returns int32
@@ -119,7 +119,7 @@ sub DH_new() returns DH is native(&gen-lib) {*}
 sub DH_free(DH) is native(&gen-lib) {*}
 sub BN_bin2bn(Blob, int32, BIGNUM) returns BIGNUM is native(&gen-lib) {*}
 sub SSL_CTX_ctrl_DH(OpenSSL::Ctx::SSL_CTX, int32, int32, DH) is symbol('SSL_CTX_ctrl')
-    returns int32 is native(&gen-lib) {*}
+    returns int32 is native(&ssl-lib) {*}
 sub get_dh1024() returns DH {
     # Based on output from `openssl dhparam -dsaparam -C 512`
     my constant dh1024_p = Blob.new:
@@ -168,7 +168,7 @@ sub EC_KEY_new() returns EC_KEY is native(&gen-lib) {*}
 sub EC_KEY_set_group(EC_KEY, EC_GROUP) returns int32 is native(&gen-lib) {*}
 sub EC_GROUP_new_by_curve_name(int32) returns EC_GROUP is native(&gen-lib) {*}
 sub SSL_CTX_ctrl_ECDH(OpenSSL::Ctx::SSL_CTX, int32, int32, EC_KEY) is symbol('SSL_CTX_ctrl')
-    returns int32 is native(&gen-lib) {*}
+    returns int32 is native(&ssl-lib) {*}
 sub get_ecdh() {
     my $ecdh = EC_KEY_new();
     without $ecdh {
