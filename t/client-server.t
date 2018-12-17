@@ -176,6 +176,6 @@ my $echo-server3-tap = $server3.tap: -> $conn {
 my $ssl-conn;
 lives-ok { $ssl-conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PORT + 3,
      ca-file => 't/certs-and-keys/ca.crt') },
-    'Can establish and SSL connection to the SSL server';
+    'Can establish an SSL connection to the SSL server';
 
 done-testing;
