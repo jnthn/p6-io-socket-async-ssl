@@ -256,15 +256,24 @@ class IO::Socket::Async::SSL {
         self!handle-buffers();
     }
 
-    method connect(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
-                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
-                   OpenSSL::ProtocolVersion :$version = -1,
-                   :$ca-file, :$ca-path, :$insecure, :$alpn,
-                   Str :$ciphers) {
+    method connect(
+		IO::Socket::Async::SSL:U:
+		Str() $host,
+		Int() $port,
+		:$enc = 'utf8',
+		:$scheduler = $*SCHEDULER,
+		OpenSSL::ProtocolVersion :$version = -1,
+		:$ca-file,
+		:$ca-path,
+		:$insecure,
+		:$alpn,
+		Str :$ciphers,
+		:$certificate-file,
+	) {
         self!client-setup:
             { IO::Socket::Async.connect($host, $port, :$scheduler) },
             :$enc, :$version, :$ca-file, :$ca-path, :$insecure,
-            :$alpn, :$ciphers, :$host;
+            :$alpn, :$ciphers, :$host, :$certificate-file;
      }
 
     method upgrade-client(IO::Socket::Async::SSL:U: IO::Socket::Async:D $conn,
@@ -275,12 +284,20 @@ class IO::Socket::Async::SSL {
             { Promise.kept($conn) },
             :$enc, :$version, :$ca-file, :$ca-path, :$insecure,
             :$alpn, :$ciphers, :$host;
-     }
+	}
 
-     method !client-setup(&connection-source,
-                          :$enc = 'utf8', OpenSSL::ProtocolVersion :$version,
-                          :$ca-file, :$ca-path, :$insecure, :$alpn, :$ciphers,
-                          Str :$host) {
+    method !client-setup(
+		&connection-source,
+		:$enc = 'utf8',
+		OpenSSL::ProtocolVersion :$version,
+		:$ca-file,
+		:$ca-path,
+		:$insecure,
+		:$alpn,
+		:$ciphers,
+		Str :$host,
+		:$certificate-file,
+	) {
         start {
             my $sock = await connection-source();
             my $connected-promise = Promise.new;
@@ -297,6 +314,9 @@ class IO::Socket::Async::SSL {
                         die "No ciphers from the provided list were selected";
                     }
                 }
+
+				self!use-certificate-file($_, $ctx) with $certificate-file;
+
                 if $alpn.defined {
                     my $buf = build-protocol-list(@$alpn);
                     SSL_CTX_set_alpn_protos($ctx, $buf, $buf.elems);
@@ -398,54 +418,9 @@ class IO::Socket::Async::SSL {
             $lib-lock.protect: {
                 $ctx = self!build-server-ctx($version);
                 my ($have-cert, $have-pkey);
-                with $certificate-file {
-                    if 1 == OpenSSL::Ctx::SSL_CTX_use_certificate_chain_file($ctx,
-                        $certificate-file.Str)
-                    {
-                        $have-cert = 'PEM';
-                    } elsif 1 == OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx,
-                            $certificate-file.Str, 2)
-                    {
-                        $have-cert = 'DER';
-                    } else {
-                        # Failed to import either PEM chain or ASN1 certificate file
-                        # Proceeding with PKCS12
-                        my $p12buf = slurp $certificate-file, :bin;
-                        my Pointer $pkcs12 = d2i_PKCS12(Pointer,
-                            CArray[CArray[uint8]].new([CArray[uint8].new($p12buf)]),
-                            $p12buf.elems);
-                        die "Failed to import $certificate-file as PEM/ASN1/PKCS12"
-                            unless so $pkcs12;
-                        my $pkey = CArray[Pointer].new([Pointer.new]);
-                        my $cert = CArray[Pointer].new([Pointer.new]);
-                        my $chain = CArray[Pointer].new([Pointer.new]);
-                        # TODO: Passphrase handling
-                        die "Failed to parse $certificate-file as PKCS12"
-                            unless 1 == PKCS12_parse($pkcs12, '', $pkey, $cert, $chain);
-                        if so $pkey[0] {
-                            $have-pkey = 'PKCS12';
-                            OpenSSL::Ctx::SSL_CTX_use_PrivateKey($ctx, $pkey[0]);
-                            OpenSSL::EVP::EVP_PKEY_free($pkey[0]);
-                        }
-                        if so $cert[0] {
-                            $have-cert = 'PKCS12';
-                            OpenSSL::Ctx::SSL_CTX_use_certificate($ctx, $cert[0]);
-                            OpenSSL::X509::X509_free($cert[0]);
-                        }
-                        if so $chain[0] {
-                            for (0..OpenSSL::Stack::sk_num(nativecast(OpenSSL::Stack, $chain[0]))) {
-                                my $x509 = OpenSSL::Stack::sk_value(nativecast(OpenSSL::Stack, $chain[0]), $_);
-                                # #define SSL_CTX_add_extra_chain_cert(ctx,x509) \
-                                #       SSL_CTX_ctrl(ctx,SSL_CTRL_EXTRA_CHAIN_CERT,0,(char *)x509)
-                                if so $x509 {
-                                    OpenSSL::Ctx::SSL_CTX_ctrl($ctx, 14, 0, $x509);
-                                }
-                            }
-                            OpenSSL::Stack::sk_free(nativecast(OpenSSL::Stack, $chain[0]));
-                        }
-                    }
-                    die "No server certificate in $certificate-file" without $have-cert;
-                }
+
+				$have-cert = self!use-certificate-file($_, $ctx) with $certificate-file;
+
                 with $private-key-file {
                     die "Private key already added as $have-pkey" with $have-pkey;
                     OpenSSL::Ctx::SSL_CTX_use_PrivateKey_file($ctx,
@@ -902,4 +877,63 @@ class IO::Socket::Async::SSL {
             }
         }
     }
+
+	method !use-certificate-file (
+		Str() $certificate-file,
+		$ctx is rw,
+	) {
+		if (OpenSSL::Ctx::SSL_CTX_use_certificate_chain_file($ctx, $certificate-file) == 1) {
+			return 'PEM';
+		}
+
+		if (OpenSSL::Ctx::SSL_CTX_use_certificate_file($ctx, $certificate-file, 2) == 1) {
+			return 'DER';
+		}
+
+		# Failed to import either PEM chain or ASN1 certificate file
+		# Proceeding with PKCS12
+		my $p12buf = $certificate-file.IO.slurp(:bin);
+		my Pointer $pkcs12 = d2i_PKCS12(
+			Pointer,
+			CArray[CArray[uint8]].new([CArray[uint8].new($p12buf)]),
+			$p12buf.elems
+		);
+
+		die "Failed to import $certificate-file as PEM/ASN1/PKCS12" unless so $pkcs12;
+
+		my $pkey = CArray[Pointer].new([Pointer.new]);
+		my $cert = CArray[Pointer].new([Pointer.new]);
+		my $chain = CArray[Pointer].new([Pointer.new]);
+
+		# TODO: Passphrase handling
+		my $pkcs12-parse = PKCS12_parse($pkcs12, '', $pkey, $cert, $chain) == 1;
+
+		die "Failed to parse $certificate-file as PKCS12" unless $pkcs12-parse;
+
+		#if ($pkey[0]) {
+		#	$have-pkey = 'PKCS12';
+		#	OpenSSL::Ctx::SSL_CTX_use_PrivateKey($ctx, $pkey[0]);
+		#	OpenSSL::EVP::EVP_PKEY_free($pkey[0]);
+		#}
+
+		die "No server certificate in $certificate-file" unless $cert[0];
+
+		OpenSSL::Ctx::SSL_CTX_use_certificate($ctx, $cert[0]);
+		OpenSSL::X509::X509_free($cert[0]);
+
+		if ($chain[0]) {
+			for (0..OpenSSL::Stack::sk_num(nativecast(OpenSSL::Stack, $chain[0]))) {
+				my $x509 = OpenSSL::Stack::sk_value(nativecast(OpenSSL::Stack, $chain[0]), $_);
+
+				if ($x509) {
+					OpenSSL::Ctx::SSL_CTX_ctrl($ctx, 14, 0, $x509);
+				}
+			}
+
+			OpenSSL::Stack::sk_free(nativecast(OpenSSL::Stack, $chain[0]));
+		}
+
+
+		return 'PKCS12';
+	}
 }
