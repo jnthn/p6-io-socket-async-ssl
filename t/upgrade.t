@@ -3,7 +3,7 @@ use IO::Socket::Async::SSL;
 
 my constant TEST_PORT = 54328;
 
-my $ready = Promise.new;;
+my $ready = Promise.new;
 start {
     react {
         whenever IO::Socket::Async.listen('localhost', TEST_PORT) -> $plain-conn {
