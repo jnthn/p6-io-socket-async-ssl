@@ -399,6 +399,8 @@ class IO::Socket::Async::SSL {
                 $ctx = self!build-server-ctx($version);
                 my ($have-cert, $have-pkey);
                 with $certificate-file {
+                    die "can not read certificate-file: $certificate-file"
+                            unless $certificate-file.IO.r;
                     if 1 == OpenSSL::Ctx::SSL_CTX_use_certificate_chain_file($ctx,
                         $certificate-file.Str)
                     {
