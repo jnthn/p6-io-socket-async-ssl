@@ -178,11 +178,12 @@ lives-ok { $ssl-conn = await IO::Socket::Async::SSL.connect('localhost', TEST_PO
      ca-file => 't/certs-and-keys/ca.crt') },
     'Can establish and SSL connection to the SSL server';
 
-#non existing/readable CA File
+#non existing/readable cert File
 my $server4 = IO::Socket::Async::SSL.listen(
           'localhost', TEST_PORT+4,
           certificate-file => 't/certs-and-keys/not_there.crt'
         );
-dies-ok { $server4.tap }, 'Certfile not there';
+
+throws-like { $server4.tap }, X::IO::Socket::Async::SSL, 'Certfile not there';
 
 done-testing;
