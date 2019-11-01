@@ -1,7 +1,7 @@
 use Test;
 use IO::Socket::Async::SSL;
 
-my constant TEST_PORT = 54329;
+my constant TEST_PORT = 54340;
 
 my $server = IO::Socket::Async::SSL.listen(
     'localhost', TEST_PORT,
