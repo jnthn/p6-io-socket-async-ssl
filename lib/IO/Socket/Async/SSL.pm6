@@ -217,7 +217,7 @@ class IO::Socket::Async::SSL {
     has $!host;
     has $!alpn;
     has $.alpn-result;
-    has Supplier::Preserving $!bytes-received .= new;
+    has Supplier::Preserving $!bytes-received;
     has @!outstanding-writes;
 
     method new() {
@@ -229,6 +229,7 @@ class IO::Socket::Async::SSL {
                     :$!read-bio, :$!write-bio,
                     :$!connected-promise, :$!accepted-promise, :$!host, :$!alpn,
                     :$!insecure = False) {
+        $!bytes-received .= new;
         $!sock.Supply(:bin).tap:
             -> Blob $data {
                 $lib-lock.protect: {
