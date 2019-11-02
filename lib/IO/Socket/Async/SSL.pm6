@@ -357,11 +357,17 @@ class IO::Socket::Async::SSL {
                   :$certificate-file, :$private-key-file, :$alpn,
                   Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
                   :$no-session-resumption-on-renegotiation) {
-        self!server-setup:
-            $socket,
-            :$enc, :$version, :$certificate-file, :$private-key-file,
-            :$alpn, :$ciphers, :$prefer-server-ciphers, :$no-compression,
-            :$no-session-resumption-on-renegotiation;
+        # Get the setup work onto another thread.
+        supply whenever Promise.kept() {
+            my $setup-supply = self!server-setup:
+                $socket,
+                :$enc, :$version, :$certificate-file, :$private-key-file,
+                :$alpn, :$ciphers, :$prefer-server-ciphers, :$no-compression,
+                :$no-session-resumption-on-renegotiation;
+            whenever $setup-supply {
+                .emit;
+            }
+        }
     }
 
     method !server-setup($connection-source,

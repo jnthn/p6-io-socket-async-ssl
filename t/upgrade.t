@@ -18,6 +18,7 @@ start {
                         uc-service($enc-conn);
                     }
                     $plain-conn.print("OK, let's talk securely!\n");
+                    last;
                 }
                 else {
                     $plain-conn.print("OK, let's talk insecurely\n");
