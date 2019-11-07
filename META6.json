@@ -1,16 +1,26 @@
 {
-    "perl"          : "6.*",
-    "name"          : "IO::Socket::Async::SSL",
-    "version"       : "0.7.5",
-    "description"   : "Provides an API like IO::Socket::Async, but with SSL support.",
-    "authors"       : [ "Jonathan Worthington <jnthn@jnthn.net>" ],
-    "license"       : "Artistic-2.0",
-    "depends"       : [ "OpenSSL" ],
-    "provides"      : {
-		"IO::Socket::Async::SSL": "lib/IO/Socket/Async/SSL.pm6"
-    },
-    "support"       : {
-        "source"    : "https://github.com/jnthn/p6-io-socket-async-ssl.git"
-    },
-    "tags"          : [ "SSL", "TLS", "Asynchronous" ]
+  "name": "IO::Socket::Async::SSL",
+  "description": "Provides an API like IO::Socket::Async, but with TLS support.",
+  "version": "0.7.5",
+  "perl": "6.*",
+  "authors": [
+    "Jonathan Worthington <jnthn@jnthn.net>"
+  ],
+  "auth": "jnthn",
+  "depends": [
+    "OpenSSL"
+  ],
+  "provides": {
+    "IO::Socket::Async::SSL": "lib/IO/Socket/Async/SSL.pm6"
+  },
+  "support": {
+    "source": "https://github.com/jnthn/p6-io-socket-async-ssl.git"
+  },
+  "license": "Artistic-2.0",
+  "tags": [
+    "SSL",
+    "TLS",
+    "Asynchronous",
+    "Socket"
+  ]
 }
