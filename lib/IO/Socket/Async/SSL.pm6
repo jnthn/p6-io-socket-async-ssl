@@ -202,6 +202,8 @@ class X::IO::Socket::Async::SSL is Exception {
 }
 class X::IO::Socket::Async::SSL::Verification is X::IO::Socket::Async::SSL {}
 
+#| An asynchronous socket with Transport Layer Security. Has an API very
+#| similar to the builtin IO::Socket::Async.
 class IO::Socket::Async::SSL {
     has IO::Socket::Async $!sock;
     has OpenSSL::Ctx::SSL_CTX $!ctx;
@@ -222,7 +224,7 @@ class IO::Socket::Async::SSL {
 
     method new() {
         die "Cannot create an asynchronous SSL socket directly; please use\n" ~
-            "IO::Socket::Async::SSL.connect or IO::Socket::Async::SSL.listen\n";
+            "IO::Socket::Async::SSL.connect or IO::Socket::Async::SSL.listen";
     }
 
     submethod BUILD(:$!sock, :$!enc, OpenSSL::Ctx::SSL_CTX :$!ctx, :$!ssl,
@@ -257,21 +259,30 @@ class IO::Socket::Async::SSL {
         self!handle-buffers();
     }
 
+    #| Establish a TLS connection. Returns a Promise that will be kept
+    #| with an IO::Socket::Async::SSL instance if the connection is
+    #| successful, or broken if the connection fails.
     method connect(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                    :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                    OpenSSL::ProtocolVersion :$version = -1,
                    :$ca-file, :$ca-path, :$insecure, :$alpn,
-                   Str :$ciphers) {
+                   Str :$ciphers --> Promise) {
         self!client-setup:
             { IO::Socket::Async.connect($host, $port, :$scheduler) },
             :$enc, :$version, :$ca-file, :$ca-path, :$insecure,
             :$alpn, :$ciphers, :$host;
      }
 
+    #| Upgrade an existing client socket to TLS. This is useful when
+    #| implementing StartTLS. It is important that the plaintext tap
+    #| of the asynchronous socket's Supply is closed, so that it can
+    #| be re-tapped by this module. Returns a Promise that will be
+    #| kept with an IO::Socket::Async::SSL instance provided the
+    #| upgrade succeeds, or broken if it fails.
     method upgrade-client(IO::Socket::Async::SSL:U: IO::Socket::Async:D $conn,
                           :$enc = 'utf8', OpenSSL::ProtocolVersion :$version = -1,
                           :$ca-file, :$ca-path, :$insecure, :$alpn,
-                          Str :$ciphers, Str :$host) {
+                          Str :$ciphers, Str :$host --> Promise) {
         self!client-setup:
             { Promise.kept($conn) },
             :$enc, :$version, :$ca-file, :$ca-path, :$insecure,
@@ -339,12 +350,16 @@ class IO::Socket::Async::SSL {
         OpenSSL::Ctx::SSL_CTX_new($method)
     }
 
+    #| Open a socket on the specified host and port, and start listening
+    #| for incoming TLS connections. Returns a Supply, upon which
+    #| successfully established incoming TLS connections will be
+    #| emitted.
     method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
                   :$certificate-file, :$private-key-file, :$alpn,
                   Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
-                  :$no-session-resumption-on-renegotiation) {
+                  :$no-session-resumption-on-renegotiation --> Supply) {
         self!server-setup:
             IO::Socket::Async.listen($host, $port, :$scheduler),
             :$enc, :$version, :$certificate-file, :$private-key-file,
@@ -352,11 +367,17 @@ class IO::Socket::Async::SSL {
             :$no-session-resumption-on-renegotiation;
     }
 
+    #| Upgrade an existing server socket to TLS. This is useful when
+    #| implementing StartTLS. It is important that the plaintext tap
+    #| of the asynchronous socket's Supply is closed, so that it can
+    #| be re-tapped by this module. Returns a Supply that will emit
+    #| IO::Socket::Async::SSL instance provided the upgrade succeeds,
+    #| or quit if it fails.
     method upgrade-server(IO::Socket::Async::SSL:U: IO::Socket::Async:D $socket,
                   :$enc = 'utf8', OpenSSL::ProtocolVersion :$version = -1,
                   :$certificate-file, :$private-key-file, :$alpn,
                   Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
-                  :$no-session-resumption-on-renegotiation) {
+                  :$no-session-resumption-on-renegotiation --> Supply) {
         # Get the setup work onto another thread.
         supply whenever Promise.kept() {
             my $setup-supply = self!server-setup:
@@ -802,7 +823,10 @@ class IO::Socket::Async::SSL {
         $rc
     }
 
-    method Supply(:$bin, :$enc = $!enc, :$scheduler = $*SCHEDULER) {
+    #| Get a Supply of incoming data, either as a byte buffer if the :bin
+    #| option is passed, or as strings otherwise. Note that strings will,
+    #| in applicable encodings, be produced in NFG.
+    method Supply(:$bin, :$enc = $!enc, :$scheduler = $*SCHEDULER --> Supply) {
         if $bin {
             $!bytes-received.Supply.Channel.Supply
         }
@@ -819,10 +843,16 @@ class IO::Socket::Async::SSL {
         }
     }
 
-    method print(IO::Socket::Async::SSL:D: Str() $str, :$scheduler = $*SCHEDULER) {
+    #| Encode a string and send its bytes over the TLS connection. Returns
+    #| a Promise that will be kept if the data is sent, and broken in the
+    #| case of an error.
+    method print(IO::Socket::Async::SSL:D: Str() $str, :$scheduler = $*SCHEDULER --> Promise) {
         self.write($str.encode($!enc // 'utf-8'), :$scheduler)
     }
 
+    #| Send the bytes in the passed blob over the TLS connection. Returns
+    #| a Promise that will be kept if the data is sent, and broken in the
+    #| case of an error.
     method write(IO::Socket::Async::SSL:D: Blob $b, :$scheduler = $*SCHEDULER) {
         $lib-lock.protect: {
             if $!closed {
@@ -846,19 +876,28 @@ class IO::Socket::Async::SSL {
         }
     }
 
+    #| Get the peer (remote) host
     method peer-host() {
         $!sock.peer-host;
     }
+
+    #| Get the peer (remote) port
     method peer-port() {
         $!sock.peer-port;
     }
+
+    #| Get the socket (local) host
     method socket-host() {
         $!sock.socket-host;
     }
+
+    #| Get the socket (local) port
     method socket-port() {
         $!sock.socket-port;
     }
 
+    #| Closes the connection. This will await the completion of any
+    #| outstanding writes before closing.
     method close(IO::Socket::Async::SSL:D: --> Nil) {
         my @wait-writes;
         $lib-lock.protect: {
@@ -885,7 +924,9 @@ class IO::Socket::Async::SSL {
     }
 
     my $alpn;
-    method supports-alpn() {
+
+    #| Check if ALPN support is available
+    method supports-alpn(--> Bool) {
         $alpn //= so try {
             my $ctx = self!build-client-ctx(-1);
             my $buf = build-protocol-list(['h2']);
