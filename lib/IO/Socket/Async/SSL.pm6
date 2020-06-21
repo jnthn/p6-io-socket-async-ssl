@@ -625,6 +625,11 @@ class IO::Socket::Async::SSL {
             }
             CATCH {
                 default {
+                    my $ex = $_;
+                    with $!shutdown-promise {
+                        warn "IO::Socket::Async::SSL: Failed to close socket: %s".sprintf($ex.message);
+                        $!shutdown-promise.break();
+                    }
                     $!bytes-received.quit($_);
                 }
             }
