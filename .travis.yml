@@ -3,7 +3,6 @@ language: perl6
 
 perl6:
   - latest
-  - "2017.10"
   - "2018.01"
 
 install:
