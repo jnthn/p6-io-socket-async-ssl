@@ -926,6 +926,11 @@ class IO::Socket::Async::SSL {
         $!sock.socket-port;
     }
 
+    #| Get the socket native descriptor
+    method native-descriptor() {
+        $!sock.native-descriptor;
+    }
+
     #| Closes the connection. This will await the completion of any
     #| outstanding writes before closing.
     method close(IO::Socket::Async::SSL:D: --> Nil) {
