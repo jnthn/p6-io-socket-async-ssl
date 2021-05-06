@@ -867,7 +867,9 @@ class IO::Socket::Async::SSL {
                 whenever $!bytes-received.Supply.Channel.Supply {
                     $dec.add-bytes($_);
                     emit $dec.consume-available-chars();
-                    LAST emit $dec.consume-all-chars();
+                    LAST if $dec.consume-all-chars() -> $final-chars {
+                        emit $final-chars;
+                    }
                 }
             }
         }
