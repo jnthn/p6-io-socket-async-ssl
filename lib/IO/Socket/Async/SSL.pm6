@@ -946,6 +946,10 @@ class IO::Socket::Async::SSL {
                 return if $!shutdown-promise;
                 without $!shutdown-promise {
                     $!shutdown-promise = Promise.new;
+                    $!shutdown-promise.then: {
+                        $!sock.close;
+                        self!cleanup();
+                    }
                     self!handle-buffers();
                 }
             }
@@ -955,8 +959,6 @@ class IO::Socket::Async::SSL {
         }
         else {
             await $!shutdown-promise;
-            $!sock.close;
-            self!cleanup();
         }
     }
 
