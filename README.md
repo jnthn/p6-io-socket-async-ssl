@@ -138,14 +138,17 @@ a non-encrypted protocol - provided negotiation is successful - a TLS handshake
 is then performed. This functionality is provided by the `upgrade-server` and
 `upgrade-client` methods. Note that the socket to upgrade must be an instance
 of `IO::Socket::Async`. Further, it is important to **stop reading from the
-socket after initiating the upgrade**.
+socket before initiating the upgrade**, which will typically entail working with
+the `Tap` directly, something not normally needed in `react`/`whenever` blocks.
 
-Here is an example of using `upgrade-server`. Note the use of `last` in order
-to terminate the `whenever` that reads from the plain connection.
+Here is an example of using `upgrade-server`.
 
     react whenever IO::Socket::Async.listen('localhost', TEST_PORT) -> $plain-conn {
-        whenever $plain-conn.Supply -> $start {
+        my $plain-tap = do whenever $plain-conn.Supply -> $start {
             if $start eq "Psst, let's talk securely!\n" {
+                # Must stop reading...
+                $plain-tap.close;
+                # ...so the module can take over the socket.
                 my $enc-conn-handshake = IO::Socket::Async::SSL.upgrade-server(
                     $plain-conn,
                     private-key-file => 't/certs-and-keys/server.key',
@@ -155,7 +158,6 @@ to terminate the `whenever` that reads from the plain connection.
                     uc-service($enc-conn);
                 }
                 $plain-conn.print("OK, let's talk securely!\n");
-                last;
             }
             else {
                 $plain-conn.print("OK, let's talk insecurely\n");
