@@ -3,7 +3,7 @@ language: perl6
 
 perl6:
   - latest
-  - "2018.01"
+  - "2020.12"
 
 install:
   - rakudobrew build-zef
