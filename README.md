@@ -1,7 +1,7 @@
 # IO::Socket::Async::SSL [![Build Status](https://travis-ci.org/jnthn/p6-io-socket-async-ssl.svg?branch=master)](https://travis-ci.org/jnthn/p6-io-socket-async-ssl)
 
 This module provides a secure sockets implementation with an API very much
-like that of the Perl 6 built-in `IO::Socket::Async` class. For the client
+like that of the Raku built-in `IO::Socket::Async` class. For the client
 case, provided the standard certificate and host verification are sufficient,
 it is drop-in replacement. The server case only needs two extra arguments to
 `listen`, specifying the server key and certificate.
@@ -15,8 +15,8 @@ Client:
 
     use IO::Socket::Async::SSL;
 
-    my $conn = await IO::Socket::Async::SSL.connect('www.perl6.org', 443);
-    $conn.print: "GET / HTTP/1.0\r\nHost: www.perl6.org\r\n\r\n";
+    my $conn = await IO::Socket::Async::SSL.connect('www.raku.org', 443);
+    $conn.print: "GET / HTTP/1.0\r\nHost: www.raku.org\r\n\r\n";
     react {
         whenever $conn {
             .print
@@ -40,7 +40,7 @@ Server (assumes certificate and key files `server-crt.pem` and `server-key.pem`)
                     say $req.lines[0];
                     await $conn.print(
                         "HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n" ~
-                        "<strong>Hello from a Perl 6 HTTP server</strong>\n");
+                        "<strong>Hello from a Raku HTTP server</strong>\n");
                     $conn.close;
                 }
             }
@@ -128,7 +128,7 @@ arguments:
   There is rarely a need to change this.
 
 The `Supply`, `print`, `write`, and `close` methods have the same semantics as
-in [IO::Socket::Async](https://docs.perl6.org/type/IO$COLON$COLONSocket$COLON$COLONAsync).
+in [IO::Socket::Async](https://docs.raku.org/type/IO$COLON$COLONSocket$COLON$COLONAsync).
 
 ## Upgrading connections
 
@@ -172,30 +172,32 @@ to terminate the `whenever` that reads from the plain connection.
         }
     }
 
-Here's an example using `upgrade-client`; again, take note of the `last`.
+Here's an example using `upgrade-client`; again, take note of the careful handling
+of the `Tap`.
 
     my $plain-conn = await IO::Socket::Async.connect('localhost', TEST_PORT);
     await $plain-conn.print("Psst, let's talk securely!\n");
-    react whenever $plain-conn -> $msg {
-        my $enc-conn-handshake = IO::Socket::Async::SSL.upgrade-client(
-            $plain-conn,
-            host => 'localhost',
-            ca-file => 't/certs-and-keys/ca.crt');
-        whenever $enc-conn-handshake -> $enc-conn {
-            await $enc-conn.print("hello!\n");
-            whenever $enc-conn.head -> $got {
-                print $got; # HELLO!
-                done;
+    react {
+        my $plain-tap = do whenever $plain-conn -> $msg {
+            $plain-tap.close;
+            my $enc-conn-handshake = IO::Socket::Async::SSL.upgrade-client(
+                $plain-conn,
+                host => 'localhost',
+                ca-file => 't/certs-and-keys/ca.crt');
+            whenever $enc-conn-handshake -> $enc-conn {
+                await $enc-conn.print("hello!\n");
+                whenever $enc-conn.head -> $got {
+                    print $got; # HELLO!
+                    done;
+                }
             }
         }
-
-        last;
     }
 
 ## Bugs, feature requests, and contributions
 
 Please use [GitHub Issues](https://github.com/jnthn/p6-io-socket-async-ssl/issues)
 to file bug reports and feature requests. If you wish to contribute to this
-module, please file a GitHub Pull Request, or email a Git patch (produced using
+module, please open a GitHub Pull Request, or email a Git patch (produced using
 `format-patch`) to [jnthn@jnthn.net](mailto:jnthn@jnthn.net). Please also use
 this email address to report security vulnerabilities.
