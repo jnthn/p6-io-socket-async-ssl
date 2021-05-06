@@ -639,19 +639,9 @@ class IO::Socket::Async::SSL {
             }
             with $!shutdown-promise {
                 if check($!ssl, OpenSSL::SSL::SSL_shutdown($!ssl)) >= 0 {
-                    self!flush-read-bio();
-                    if @!outstanding-writes {
-                        Promise.allof(@!outstanding-writes).then({
-                            $!shutdown-promise.keep(True);
-                        });
-                    }
-                    else {
-                        $!shutdown-promise.keep(True);
-                    }
+                    $!shutdown-promise.keep(True) unless $!shutdown-promise;
                 }
-                else {
-                    self!flush-read-bio();
-                }
+                self!flush-read-bio();
             }
             CATCH {
                 default {
