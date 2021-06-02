@@ -884,9 +884,9 @@ class IO::Socket::Async::SSL {
                 ));
                 return $p;
             }
+            OpenSSL::SSL::SSL_write($!ssl, $b, $b.bytes);
             my $p = start {
                 $lib-lock.protect: {
-                    OpenSSL::SSL::SSL_write($!ssl, $b, $b.bytes);
                     self!flush-read-bio();
                     # The following doesn't race on $p assignment due to the
                     # holding of $lib-lock in the code with the assignment.
