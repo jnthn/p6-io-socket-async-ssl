@@ -227,6 +227,24 @@ try {
 # There are smarter things possible.
 my $lib-lock = Lock.new;
 
+# We use an atomic reference count to decide when we can safely free a
+# SSL_CTX. This is due to servers potentially having connections that
+# live on after the immediate aftermath of the server shutdown, and
+# relying on the SSL_CTX.
+my class RefCountedContext {
+    has OpenSSL::Ctx::SSL_CTX $.ctx is required;
+    has atomicint $!count = 1;
+    method inc(--> Nil) {
+        ++⚛$!count;
+    }
+    method dec(--> Nil) {
+        if --⚛$!count == 0 {
+            OpenSSL::Ctx::SSL_CTX_free($!ctx);
+            $!ctx = Nil;
+        }
+    }
+}
+
 class X::IO::Socket::Async::SSL is Exception {
     has Str $.message;
 }
@@ -236,7 +254,7 @@ class X::IO::Socket::Async::SSL::Verification is X::IO::Socket::Async::SSL {}
 #| similar to the builtin IO::Socket::Async.
 class IO::Socket::Async::SSL {
     has IO::Socket::Async $!sock;
-    has OpenSSL::Ctx::SSL_CTX $!ctx;
+    has RefCountedContext $!rc-ctx;
     has OpenSSL::SSL::SSL $!ssl;
     has $!read-bio;
     has $!write-bio;
@@ -257,8 +275,8 @@ class IO::Socket::Async::SSL {
             "IO::Socket::Async::SSL.connect or IO::Socket::Async::SSL.listen";
     }
 
-    submethod BUILD(:$!sock, :$!enc, OpenSSL::Ctx::SSL_CTX :$!ctx, :$!ssl,
-                    :$!read-bio, :$!write-bio,
+    submethod BUILD(:$!sock!, :$!enc, RefCountedContext :ctx($!rc-ctx)!, :$!ssl!,
+                    :$!read-bio!, :$!write-bio!,
                     :$!connected-promise, :$!accepted-promise, :$!host, :$!alpn,
                     :$!insecure = False) {
         $!bytes-received .= new;
@@ -357,8 +375,9 @@ class IO::Socket::Async::SSL {
                     OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
                 }
                 self.bless(
-                    :$sock, :$enc, :$ctx, :$ssl, :$read-bio, :$write-bio,
-                    :$connected-promise, :$host, :$insecure, :$alpn
+                    :$sock, :$enc, :$ssl, :$read-bio, :$write-bio,
+                    :$connected-promise, :$host, :$insecure, :$alpn,
+                    :ctx(RefCountedContext.new(:$ctx))
                 )
             }
             await $connected-promise;
@@ -556,11 +575,15 @@ class IO::Socket::Async::SSL {
                 }
             }
 
+            # Wrap context in reference count for safe freeing. We will
+            # decrement the count here; lingering connections may later
+            # be the thing that finally frees it.
+            my $rc-ctx = RefCountedContext.new(:$ctx);
             CLOSE {
                 $lib-lock.protect: {
-                    if $ctx {
-                        OpenSSL::Ctx::SSL_CTX_free($ctx);
-                        $ctx = Nil;
+                    if $rc-ctx {
+                        $rc-ctx.dec;
+                        $rc-ctx = Nil;
                     }
                 }
             }
@@ -577,21 +600,25 @@ class IO::Socket::Async::SSL {
             sub handle-connection($sock) {
                 my $accepted-promise = Promise.new;
                 $lib-lock.protect: {
-                    with $ctx {
-                        my $ssl = OpenSSL::SSL::SSL_new($ctx);
-                        my $read-bio = BIO_new(BIO_s_mem());
-                        my $write-bio = BIO_new(BIO_s_mem());
-                        check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
-                        OpenSSL::SSL::SSL_set_accept_state($ssl);
-                        CATCH {
-                            .note;
-                            OpenSSL::SSL::SSL_free($ssl) if $ssl;
-                            OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
+                    with $rc-ctx {
+                        my $ctx = $rc-ctx.ctx;
+                        $rc-ctx.inc;
+                        {
+                            my $ssl = OpenSSL::SSL::SSL_new($ctx);
+                            my $read-bio = BIO_new(BIO_s_mem());
+                            my $write-bio = BIO_new(BIO_s_mem());
+                            check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
+                            OpenSSL::SSL::SSL_set_accept_state($ssl);
+                            CATCH {
+                                .note;
+                                OpenSSL::SSL::SSL_free($ssl) if $ssl;
+                                $rc-ctx.dec;
+                            }
+                            self.bless(
+                                :$sock, :$enc, :$ssl, :$read-bio, :$write-bio,
+                                :ctx($rc-ctx), :$accepted-promise, :$alpn
+                            )
                         }
-                        self.bless(
-                            :$sock, :$enc, :$ssl, :$read-bio, :$write-bio,
-                            :$accepted-promise, :$alpn
-                        )
                     } else {
                         $accepted-promise.break;
                     }
@@ -976,15 +1003,15 @@ class IO::Socket::Async::SSL {
     }
 
     method !cleanup() {
-        if $!ssl || $!ctx {
+        if $!ssl || $!rc-ctx {
             start $lib-lock.protect: {
                 if $!ssl {
                     OpenSSL::SSL::SSL_free($!ssl);
                     $!ssl = Nil;
                 }
-                if $!ctx {
-                    OpenSSL::Ctx::SSL_CTX_free($!ctx);
-                    $!ctx = Nil;
+                if $!rc-ctx {
+                    $!rc-ctx.dec();
+                    $!rc-ctx = Nil;
                 }
                 $!read-bio = Nil;
                 $!write-bio = Nil;
