@@ -557,9 +557,11 @@ class IO::Socket::Async::SSL {
             }
 
             CLOSE {
-                if $ctx {
-                    OpenSSL::Ctx::SSL_CTX_free($ctx);
-                    $ctx = Nil;
+                $lib-lock.protect: {
+                    if $ctx {
+                        OpenSSL::Ctx::SSL_CTX_free($ctx);
+                        $ctx = Nil;
+                    }
                 }
             }
 
@@ -575,20 +577,24 @@ class IO::Socket::Async::SSL {
             sub handle-connection($sock) {
                 my $accepted-promise = Promise.new;
                 $lib-lock.protect: {
-                    my $ssl = OpenSSL::SSL::SSL_new($ctx);
-                    my $read-bio = BIO_new(BIO_s_mem());
-                    my $write-bio = BIO_new(BIO_s_mem());
-                    check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
-                    OpenSSL::SSL::SSL_set_accept_state($ssl);
-                    CATCH {
-                        .note;
-                        OpenSSL::SSL::SSL_free($ssl) if $ssl;
-                        OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
+                    with $ctx {
+                        my $ssl = OpenSSL::SSL::SSL_new($ctx);
+                        my $read-bio = BIO_new(BIO_s_mem());
+                        my $write-bio = BIO_new(BIO_s_mem());
+                        check($ssl, OpenSSL::SSL::SSL_set_bio($ssl, $read-bio, $write-bio));
+                        OpenSSL::SSL::SSL_set_accept_state($ssl);
+                        CATCH {
+                            .note;
+                            OpenSSL::SSL::SSL_free($ssl) if $ssl;
+                            OpenSSL::Ctx::SSL_CTX_free($ctx) if $ctx;
+                        }
+                        self.bless(
+                            :$sock, :$enc, :$ssl, :$read-bio, :$write-bio,
+                            :$accepted-promise, :$alpn
+                        )
+                    } else {
+                        $accepted-promise.break;
                     }
-                    self.bless(
-                        :$sock, :$enc, :$ssl, :$read-bio, :$write-bio,
-                        :$accepted-promise, :$alpn
-                    )
                 }
                 whenever $accepted-promise -> $ssl-socket {
                     emit $ssl-socket;
