@@ -24,6 +24,11 @@ sub d2i_PKCS12(Pointer, CArray[CArray[uint8]], long) returns Pointer is native(&
 sub PKCS12_parse(Pointer, Str, CArray[Pointer], CArray[Pointer], CArray[Pointer])
     returns int32 is native(&gen-lib) {*}
 
+sub SSL_CTX_set_keylog_callback(OpenSSL::Ctx::SSL_CTX, &callback (
+                                        OpenSSL::SSL::SSL,    # ssl
+                                        Str))                 # line
+    is native(&gen-lib) {*}
+
 my constant SSL_TLSEXT_ERR_OK = 0;
 my constant SSL_TLSEXT_ERR_ALERT_FATAL = 2;
 my constant SSL_TLSEXT_ERR_NOACK = 3;
@@ -296,11 +301,11 @@ class IO::Socket::Async::SSL {
                    :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                    OpenSSL::ProtocolVersion :$version = -1,
                    :$ca-file, :$ca-path, :$insecure, :$alpn,
-                   Str :$ciphers --> Promise) {
+                   Str :$ciphers, :$ssl-key-log-file --> Promise) {
         self!client-setup:
             { IO::Socket::Async.connect($host, $port, :$scheduler) },
             :$enc, :$version, :$ca-file, :$ca-path, :$insecure,
-            :$alpn, :$ciphers, :$host;
+            :$alpn, :$ciphers, :$host, :$ssl-key-log-file;
      }
 
     #| Upgrade an existing client socket to TLS. This is useful when
@@ -312,22 +317,34 @@ class IO::Socket::Async::SSL {
     method upgrade-client(IO::Socket::Async::SSL:U: IO::Socket::Async:D $conn,
                           :$enc = 'utf8', OpenSSL::ProtocolVersion :$version = -1,
                           :$ca-file, :$ca-path, :$insecure, :$alpn,
-                          Str :$ciphers, Str :$host --> Promise) {
+                          Str :$ciphers, Str :$host, :$ssl-key-log-file --> Promise) {
         self!client-setup:
             { Promise.kept($conn) },
             :$enc, :$version, :$ca-file, :$ca-path, :$insecure,
-            :$alpn, :$ciphers, :$host;
+            :$alpn, :$ciphers, :$host, :$ssl-key-log-file;
      }
 
      method !client-setup(&connection-source,
                           :$enc = 'utf8', OpenSSL::ProtocolVersion :$version,
                           :$ca-file, :$ca-path, :$insecure, :$alpn, :$ciphers,
-                          Str :$host) {
+                          Str :$host, :$ssl-key-log-file) {
         start {
             my $sock = await connection-source();
             my $connected-promise = Promise.new;
             $lib-lock.protect: {
                 my $ctx = self!build-client-ctx($version);
+                with $ssl-key-log-file {
+                    SSL_CTX_set_keylog_callback($ctx, sub ($ssl, $line) {
+                        $ssl-key-log-file.IO.spurt: $line ~ "\n", :append;
+                        CATCH {
+                            default {
+                                note "Failed to write TLS keys to $ssl-key-log-file. Reason:";
+                                note .message;
+                            }
+                        }
+                    });
+                }
+
                 SSL_CTX_set_default_verify_paths($ctx);
                 if defined($ca-file) || defined($ca-path) {
                     SSL_CTX_load_verify_locations($ctx,
