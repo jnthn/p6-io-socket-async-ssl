@@ -81,6 +81,12 @@ man-in-the-middle attacks.
 For control over the ciphers that may be used, pass the `ciphers` argument to
 `connect`. It should be a string in [OpenSSL cipher list format](https://www.openssl.org/docs/man1.0.2/apps/ciphers.html).
 
+If wishing to view encrypted traffic with a tool such as Wireshark for debugging
+purposes, pass a filename to `ssl-key-log-file`. Session keys will be written to
+this log file, and Wireshark can then be configured to introspect the encrypted
+traffic (Preferences -> Protocols -> TLS -> (Pre-)-Master-Secret log filename). Note
+that this key exposure compromises the security of the session!
+
 ## Server
 
 The `listen` method returns a `Supply` that, when tapped, will start an SSL
