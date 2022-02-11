@@ -747,7 +747,7 @@ class IO::Socket::Async::SSL {
     method !check-alpn() {
         my $protocol = CArray[CArray[uint8]].new;
         $protocol[0] = CArray[uint8].new;
-        my int32 $len;
+        my uint32 $len;
         SSL_get0_alpn_selected($!ssl, $protocol, $len);
         if $len == 0 {
             $!alpn-result = Nil;
