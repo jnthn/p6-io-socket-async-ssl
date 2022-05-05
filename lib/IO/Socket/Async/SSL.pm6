@@ -67,7 +67,12 @@ my constant %VERIFY_FAILURE_REASONS = %(
      32 => 'usage does not include certificate signing',
      50 => 'application verification failure',
 );
-sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer is native(&ssl-lib) {*}
+my constant SSL_GET_PEER_CERT_SYMBOL = OpenSSL::Version::version_num() < 0x30000000 
+                                            ?? "SSL_get_peer_certificate" 
+                                            !! "SSL_get1_peer_certificate";
+sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer 
+    is native(&ssl-lib) 
+    is symbol(SSL_GET_PEER_CERT_SYMBOL) {*}
 sub X509_get_ext_d2i(Pointer, int32, CArray[int32], CArray[int32]) returns OpenSSL::Stack
     is native(&gen-lib) {*}
 sub ASN1_STRING_to_UTF8(CArray[CArray[uint8]], Pointer) returns int32
