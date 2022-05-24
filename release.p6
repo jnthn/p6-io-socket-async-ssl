@@ -1,16 +1,10 @@
 use JSON::Fast;
 
 sub MAIN() {
-    given from-json(slurp('META6.json')) -> (:$name!, :$version!, *%) {
-        my $dist-name = $name.subst('::', '-', :g);
-        my $tar-name = "{$dist-name}-{$version}.tar.gz";
-        write-tar($dist-name, $tar-name);
+    given from-json(slurp('META6.json')) -> (:$version!, *%) {
+        shell("fez-upload");
         tag("release-$version");
     }
-}
-
-sub write-tar($dist-name, $tar-name) {
-    shell "git archive --prefix=$dist-name/ -o ../$tar-name HEAD"
 }
 
 sub tag($tag) {
