@@ -1,12 +1,12 @@
 {
   "name": "IO::Socket::Async::SSL",
   "description": "Provides an API like IO::Socket::Async, but with TLS support.",
-  "version": "0.7.10",
+  "version": "0.7.11",
   "perl": "6.*",
   "authors": [
     "Jonathan Worthington <jnthn@jnthn.net>"
   ],
-  "auth": "jnthn",
+  "auth": "zef:<jnthn>",
   "depends": [
     "OpenSSL"
   ],
