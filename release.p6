@@ -2,7 +2,7 @@ use JSON::Fast;
 
 sub MAIN() {
     given from-json(slurp('META6.json')) -> (:$version!, *%) {
-        shell("fez-upload");
+        shell("fez upload");
         tag("release-$version");
     }
 }
