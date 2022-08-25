@@ -67,11 +67,11 @@ my constant %VERIFY_FAILURE_REASONS = %(
      32 => 'usage does not include certificate signing',
      50 => 'application verification failure',
 );
-my constant SSL_GET_PEER_CERT_SYMBOL = OpenSSL::Version::version_num() < 0x30000000 
-                                            ?? "SSL_get_peer_certificate" 
+my constant SSL_GET_PEER_CERT_SYMBOL = OpenSSL::Version::version_num() < 0x30000000
+                                            ?? "SSL_get_peer_certificate"
                                             !! "SSL_get1_peer_certificate";
-sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer 
-    is native(&ssl-lib) 
+sub SSL_get_peer_certificate(OpenSSL::SSL::SSL) returns Pointer
+    is native(&ssl-lib)
     is symbol(SSL_GET_PEER_CERT_SYMBOL) {*}
 sub X509_get_ext_d2i(Pointer, int32, CArray[int32], CArray[int32]) returns OpenSSL::Stack
     is native(&gen-lib) {*}
@@ -113,19 +113,13 @@ my constant SSL_OP_CIPHER_SERVER_PREFERENCE = 0x400000;
 
 # DH setup-related bits, so we can use ciphers that need this
 my constant BIGNUM = Pointer;
-my class DH is repr('CStruct') {
-    has int32 $.pad;
-    has int32 $.version;
-    has BIGNUM $.p;
-    has BIGNUM $.g;
-    has int32 $.length is rw;
-    # There are more fields in this struct, but we don't care about them in this
-    # module.
-
-    method set-p(\p) { $!p := p }
-    method set-g(\g) { $!g := g }
-};
+my constant DH = Pointer;
 sub DH_new() returns DH is native(&gen-lib) {*}
+sub DH_set0_pqg(DH, BIGNUM, BIGNUM, BIGNUM) is native(&gen-lib) {*};
+sub DH_get0_p(DH) returns BIGNUM is native(&gen-lib) {*};
+sub DH_get0_g(DH) returns BIGNUM is native(&gen-lib) {*};
+sub DH_set_length(DH, int32) returns int32 is native(&gen-lib) {*};
+sub DH_get_length(DH) returns int32 is native(&gen-lib) {*};
 sub DH_free(DH) is native(&gen-lib) {*}
 sub BN_bin2bn(Blob, int32, BIGNUM) returns BIGNUM is native(&gen-lib) {*}
 sub SSL_CTX_ctrl_DH(OpenSSL::Ctx::SSL_CTX, int32, int32, DH) is symbol('SSL_CTX_ctrl')
@@ -190,13 +184,14 @@ sub get_dh2048() returns DH {
     without $dh {
         fail("Could not allocate DH");
     }
-    $dh.set-p: BN_bin2bn(dh2048_p, dh2048_p.elems, BIGNUM);
-    $dh.set-g: BN_bin2bn(dh2048_g, dh2048_g.elems, BIGNUM);
-    if !$dh.p || !$dh.g {
+    my $p = BN_bin2bn(dh2048_p, dh2048_p.elems, BIGNUM);
+    my $g = BN_bin2bn(dh2048_g, dh2048_g.elems, BIGNUM);
+    DH_set0_pqg($dh, $p, BIGNUM.new, $g);
+    DH_set_length($dh, 256);
+    if !DH_get0_p($dh) || !DH_get0_g($dh) || DH_get_length($dh) != 256 {
         DH_free($dh);
         fail("Failed to set up DH");
     }
-    $dh.length = 256;
     return $dh;
 }
 
