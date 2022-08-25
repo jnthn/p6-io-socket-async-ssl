@@ -113,6 +113,18 @@ my constant SSL_OP_CIPHER_SERVER_PREFERENCE = 0x400000;
 
 # DH setup-related bits, so we can use ciphers that need this
 my constant BIGNUM = Pointer;
+my class DH_1_0 is repr('CStruct') {
+    has int32 $.pad;
+    has int32 $.version;
+    has BIGNUM $.p;
+    has BIGNUM $.g;
+    has int32 $.length is rw;
+    # There are more fields in this struct, but we don't care about them in this
+    # module.
+
+    method set-p(\p) { $!p := p }
+    method set-g(\g) { $!g := g }
+};
 my constant DH = Pointer;
 sub DH_new() returns DH is native(&gen-lib) {*}
 sub DH_set0_pqg(DH, BIGNUM, BIGNUM, BIGNUM) is native(&gen-lib) {*};
@@ -184,13 +196,25 @@ sub get_dh2048() returns DH {
     without $dh {
         fail("Could not allocate DH");
     }
-    my $p = BN_bin2bn(dh2048_p, dh2048_p.elems, BIGNUM);
-    my $g = BN_bin2bn(dh2048_g, dh2048_g.elems, BIGNUM);
-    DH_set0_pqg($dh, $p, BIGNUM.new, $g);
-    DH_set_length($dh, 256);
-    if !DH_get0_p($dh) || !DH_get0_g($dh) || DH_get_length($dh) != 256 {
-        DH_free($dh);
-        fail("Failed to set up DH");
+    my \p = BN_bin2bn(dh2048_p, dh2048_p.elems, BIGNUM);
+    my \g = BN_bin2bn(dh2048_g, dh2048_g.elems, BIGNUM);
+    try {
+        DH_set0_pqg($dh, p, BIGNUM.new, g);
+        DH_set_length($dh, 256);
+        if !DH_get0_p($dh) || !DH_get0_g($dh) || DH_get_length($dh) != 256 {
+            DH_free($dh);
+            fail("Failed to set up DH");
+        }
+    }
+    if $! {
+        my $dh1 = nativecast(DH_1_0, $dh);
+        $dh1.set-p(p);
+        $dh1.set-g(g);
+        $dh1.length = 256;
+        if !$dh1.p || !$dh1.g {
+            DH_free($dh1);
+            fail("Failed to set up DH");
+        }
     }
     return $dh;
 }
