@@ -14,8 +14,8 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-#          - macOS-latest
-#          - windows-latest
+          - macOS-latest
+          # - windows-latest
         raku-version:
           - "2021.03"
           - "latest"
@@ -25,6 +25,9 @@ jobs:
       - uses: Raku/setup-raku@v1
         with:
           raku-version: ${{ matrix.raku-version }}
+      - name: Install Libraries (MacOS)
+        if: matrix.os == 'macOS-latest'
+        run: brew install openssl
       - name: Setup dependencies
         run: raku -v && zef install --verbose --deps-only .
       - name: Test code
