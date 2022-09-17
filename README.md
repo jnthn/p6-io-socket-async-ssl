@@ -58,7 +58,7 @@ and the SSL handshake completed.
     my $conn = await IO::Socket::Async::SSL.connect($host, $port);
 
 By default, the SSL certificate will be verified, using the default set of
-accepted Certificate Authorities. The `Promise` return by `conenct` will be
+accepted Certificate Authorities. The `Promise` return by `connect` will be
 broken if verification fails.
 
 Sometimes it is convenient to create a CA and use it to sign certificates for
