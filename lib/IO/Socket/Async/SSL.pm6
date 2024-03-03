@@ -931,7 +931,7 @@ class IO::Socket::Async::SSL {
                 ));
                 return $p;
             }
-            OpenSSL::SSL::SSL_write($!ssl, $b, $b.bytes);
+            my $ret = OpenSSL::SSL::SSL_write($!ssl, $b, $b.bytes);
             my $p = start {
                 $lib-lock.protect: {
                     self!flush-read-bio();
@@ -939,6 +939,7 @@ class IO::Socket::Async::SSL {
                     # holding of $lib-lock in the code with the assignment.
                     @!outstanding-writes .= grep({ $_ !=== $p });
                 }
+                $ret
             }
             @!outstanding-writes.push($p);
             $p
