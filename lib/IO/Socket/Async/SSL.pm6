@@ -426,13 +426,14 @@ class IO::Socket::Async::SSL {
     #| successfully established incoming TLS connections will be
     #| emitted.
     method listen(IO::Socket::Async::SSL:U: Str() $host, Int() $port,
+                  Int() $backlog = 128,
                   :$enc = 'utf8', :$scheduler = $*SCHEDULER,
                   OpenSSL::ProtocolVersion :$version = -1,
                   :$certificate-file, :$private-key-file, :$alpn,
                   Str :$ciphers, :$prefer-server-ciphers, :$no-compression,
                   :$no-session-resumption-on-renegotiation --> Supply) {
         self!server-setup:
-            IO::Socket::Async.listen($host, $port, :$scheduler),
+            IO::Socket::Async.listen($host, $port, $backlog, :$scheduler),
             :$enc, :$version, :$certificate-file, :$private-key-file,
             :$alpn, :$ciphers, :$prefer-server-ciphers, :$no-compression,
             :$no-session-resumption-on-renegotiation;
